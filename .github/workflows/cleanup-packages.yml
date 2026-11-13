@@ -1,0 +1,71 @@
+name: Clean fork container images
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Inspect or delete old container image versions
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - delete
+      created_before:
+        description: Delete only versions created before this ISO 8601 UTC timestamp
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: cleanup-fork-container-images
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.repository == 'CarterLeeAlt/3x-ui'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect or delete fork image versions
+        uses: actions/github-script@v8
+        env:
+          CLEANUP_MODE: ${{ inputs.mode }}
+          CREATED_BEFORE: ${{ inputs.created_before }}
+        with:
+          script: |
+            const parameters = {
+              username: context.repo.owner,
+              package_type: 'container',
+              package_name: '3x-ui',
+            };
+            const packageRoute = 'GET /users/{username}/packages/{package_type}/{package_name}';
+            let image;
+            try {
+              image = (await github.request(packageRoute, parameters)).data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.info('The fork container package does not exist.');
+              return;
+            }
+            const versionsRoute = 'GET /users/{username}/packages/{package_type}/{package_name}/versions';
+            const versions = await github.paginate(versionsRoute, { ...parameters, per_page: 100 });
+            core.info(JSON.stringify({ repository: image.repository?.full_name, versions: versions.map(version => ({ id: version.id, created_at: version.created_at, tags: version.metadata.container.tags })) }));
+            if (process.env.CLEANUP_MODE === 'inspect') return;
+            if (process.env.CLEANUP_MODE !== 'delete') throw new Error('Unknown cleanup mode.');
+            if (image.repository?.full_name !== 'CarterLeeAlt/3x-ui') {
+              throw new Error('The container package is not linked to CarterLeeAlt/3x-ui.');
+            }
+            const cutoff = Date.parse(process.env.CREATED_BEFORE);
+            if (!Number.isFinite(cutoff) || cutoff > Date.now()) {
+              throw new Error('created_before must be a valid UTC timestamp in the past.');
+            }
+            const oldVersions = versions.filter(version => Date.parse(version.created_at) < cutoff);
+            for (const version of oldVersions) {
+              await github.request('DELETE /users/{username}/packages/{package_type}/{package_name}/versions/{package_version_id}', { ...parameters, package_version_id: version.id });
+              core.info(`Deleted container image version ${version.id}.`);
+            }
+            core.info(`Deleted ${oldVersions.length} old container image versions.`);

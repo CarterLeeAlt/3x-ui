@@ -4,7 +4,7 @@ Thanks for taking the time to contribute to 3x-ui. This guide gets a development
 
 ## Prerequisites
 
-- **Go 1.26+** (the version pinned in `go.mod`)
+- **Go 1.27.4+** (the version pinned in `go.mod`)
 - **Node.js 22+** and npm 10+ (for the React frontend)
 - **Git**
 - **A C compiler** — required by the CGo SQLite driver (`github.com/mattn/go-sqlite3`). Linux and macOS already ship one; for Windows see below.
@@ -158,7 +158,7 @@ The Vite dev proxy rewrites the sidebar's production-style links (`/panel`, `/pa
 - **No `//` line comments** in committed JS/TS/Vue/Go. HTML `<!-- ... -->` is fine for template structure. Names should carry the meaning; rename rather than annotate. Comments are reserved for the *why*, and only when the reason is surprising.
 - **RTL is a first-class concern.** Persian and Arabic users matter — RTL is enabled through AntD's `ConfigProvider direction="rtl"`. When writing Persian text in toasts or labels, isolate code identifiers on their own lines so RTL reading flows.
 - **Do not break link generation.** Share-link generation has two paths: the **inbounds page** (`InboundsPage.tsx` → `checkFallback()`) and the **clients page** (`/panel/api/clients/subLinks/:subId` → backend `GetSubs`). Exercise both whenever URL generation, fallback projection, or TLS handling changes.
-- **Vite is pinned** to `8.0.13`. Do not bump to `8.0.14+` — the esbuild dep-optimizer in those builds breaks i18n loading in dev mode.
+- **Vite is pinned** to `8.3.8`. Verify Chinese translation loading in dev mode when updating the dependency optimizer.
 
 ### Project layout
 
