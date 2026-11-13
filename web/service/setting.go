@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -197,6 +198,9 @@ func (s *SettingService) GetAllSetting() (*entity.AllSetting, error) {
 		}
 	}
 
+	if runtime.GOOS == "windows" {
+		allSetting.WebListen = "127.0.0.1"
+	}
 	return allSetting, nil
 }
 
@@ -324,11 +328,24 @@ func (s *SettingService) SetXrayOutboundTestUrl(url string) error {
 }
 
 func (s *SettingService) GetListen() (string, error) {
+	if runtime.GOOS == "windows" {
+		return "127.0.0.1", nil
+	}
 	return s.getString("webListen")
 }
 
 func (s *SettingService) SetListen(ip string) error {
+	if err := validatePanelListen(ip); err != nil {
+		return err
+	}
 	return s.setString("webListen", ip)
+}
+
+func validatePanelListen(ip string) error {
+	if runtime.GOOS == "windows" && ip != "127.0.0.1" {
+		return errors.New("Windows 管理面板的监听地址固定为 127.0.0.1")
+	}
+	return nil
 }
 
 func (s *SettingService) GetWebDomain() (string, error) {
@@ -767,6 +784,9 @@ func (s *SettingService) GetLdapDefaultLimitIP() (int, error) {
 }
 
 func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
+	if err := validatePanelListen(allSetting.WebListen); err != nil {
+		return err
+	}
 	if err := s.preserveRedactedSecrets(allSetting); err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/mhsanaei/3x-ui/v3/database"
@@ -89,5 +90,48 @@ func TestSanitizePublicHTTPURLBlocksPrivateAddressUnlessAllowed(t *testing.T) {
 	}
 	if got, err := SanitizePublicHTTPURL("http://127.0.0.1:8080/hook", true); err != nil || got != "http://127.0.0.1:8080/hook" {
 		t.Fatalf("allowPrivate result = %q, %v", got, err)
+	}
+}
+
+func TestPanelListenPlatformPolicy(t *testing.T) {
+	setupSettingTestDB(t)
+	s := &SettingService{}
+	if err := s.saveSetting("webListen", "0.0.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	want := "0.0.0.0"
+	if runtime.GOOS == "windows" {
+		want = "127.0.0.1"
+	}
+	if got, err := s.GetListen(); err != nil || got != want {
+		t.Fatalf("listen = %q, %v; want %q", got, err, want)
+	}
+	view, err := s.GetAllSettingView()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.WebListen != want {
+		t.Fatalf("incorrect listen view: %q", view.WebListen)
+	}
+	for _, address := range []string{"", "0.0.0.0", "::1", "192.0.2.1"} {
+		err := s.SetListen(address)
+		if runtime.GOOS == "windows" && err == nil {
+			t.Fatalf("accepted Windows listen address %q", address)
+		}
+		if runtime.GOOS != "windows" && err != nil {
+			t.Fatal(err)
+		}
+	}
+	if runtime.GOOS == "windows" {
+		view.WebListen = "0.0.0.0"
+		if err := s.UpdateAllSetting(&view.AllSetting); err == nil {
+			t.Fatal("settings API accepted a non-loopback listen address")
+		}
+	}
+	if err := s.SetListen("127.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.GetSubListen(); err != nil || got != "" {
+		t.Fatalf("subscription binding was changed: %q, %v", got, err)
 	}
 }

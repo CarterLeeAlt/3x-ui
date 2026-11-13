@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -59,7 +60,10 @@ func (a *SettingController) getAllSetting(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "pages.settings.toasts.getSettings"), err)
 		return
 	}
-	jsonObj(c, allSetting, nil)
+	jsonObj(c, struct {
+		*entity.AllSetting
+		WebListenFixed bool `json:"webListenFixed"`
+	}{allSetting, runtime.GOOS == "windows"}, nil)
 }
 
 // getDefaultSettings retrieves the default settings based on the host.

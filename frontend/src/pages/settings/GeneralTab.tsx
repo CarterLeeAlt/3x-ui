@@ -117,8 +117,8 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
               </Space.Compact>
             </SettingListItem>
 
-            <SettingListItem paddings="small" title={t('pages.settings.panelListeningIP')} description={t('pages.settings.panelListeningIPDesc')}>
-              <Input value={allSetting.webListen} onChange={(e) => updateSetting({ webListen: e.target.value })} />
+            <SettingListItem paddings="small" title={t('pages.settings.panelListeningIP')} description={allSetting.webListenFixed ? 'Windows 管理面板仅允许通过 127.0.0.1 访问，监听地址固定。' : t('pages.settings.panelListeningIPDesc')}>
+              <Input value={allSetting.webListen} readOnly={allSetting.webListenFixed} onChange={(e) => updateSetting({ webListen: e.target.value })} />
             </SettingListItem>
 
             <SettingListItem paddings="small" title={t('pages.settings.panelListeningDomain')} description={t('pages.settings.panelListeningDomainDesc')}>

@@ -98,7 +98,6 @@ func (h *host) Execute(_ []string, requests <-chan svc.ChangeRequest, changes ch
 		"XUI_BIN_FOLDER="+filepath.Join(h.root, "bin"),
 		"XUI_DEBUG=false",
 		"XUI_LOG_LEVEL=info",
-		"XUI_DEFAULT_SUB_PORT=2196",
 	)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile

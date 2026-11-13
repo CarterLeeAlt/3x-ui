@@ -2,6 +2,7 @@ import { ObjectUtil } from '@/utils';
 
 export class AllSetting {
   webListen = '';
+  webListenFixed = false;
   webDomain = '';
   webPort = 2053;
   webCertFile = '';
