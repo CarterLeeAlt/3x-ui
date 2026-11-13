@@ -272,8 +272,18 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat" -OutFile "geosite_RU.dat"
           Rename-Item xray.exe xray-windows-amd64.exe
           cd ..
-          Copy-Item -Path ..\windows_files\* -Destination . -Recurse
+          Get-ChildItem ..\windows_files | Where-Object Name -ne 'service-host' | Copy-Item -Destination . -Recurse
+          Copy-Item -Path ..\config\version -Destination .\version.txt
           cd ..
+
+      - name: Build Windows service host
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = '0'
+          Push-Location windows_files\service-host
+          go build -ldflags "-s -w" -o ..\..\x-ui\x-ui-service.exe .
+          if ($LASTEXITCODE -ne 0) { throw 'service host build failed' }
+          Pop-Location
 
       - name: Package to Zip
         shell: pwsh
