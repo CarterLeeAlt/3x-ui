@@ -182,7 +182,7 @@ func (t *Tgbot) setCachedServerStats(stats string) {
 // Start initializes and starts the Telegram bot with the provided translation files.
 func (t *Tgbot) Start(i18nFS embed.FS) error {
 	// Initialize localizer
-	err := locale.InitLocalizer(i18nFS, &t.settingService)
+	err := locale.InitLocalizer(i18nFS)
 	if err != nil {
 		return err
 	}

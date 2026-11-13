@@ -1,5 +1,6 @@
 import { lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import zhCN from 'antd/locale/zh_CN';
 import {
   Button,
   Card,
@@ -155,7 +156,7 @@ export default function IndexPage() {
   const pageClass = `index-page ${isDark ? 'is-dark' : ''} ${isUltra ? 'is-ultra' : ''}`.trim();
 
   return (
-    <ConfigProvider theme={antdThemeConfig}>
+    <ConfigProvider theme={antdThemeConfig} locale={zhCN}>
       {messageContextHolder}
       <Layout className={pageClass}>
         <AppSidebar basePath={basePath} requestUri={requestUri} />

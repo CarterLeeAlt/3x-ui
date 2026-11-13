@@ -197,7 +197,7 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 
 	// init i18n — still used by backend strings (errors, log messages,
 	// SubPage menu entries) even though the Go template engine is gone.
-	err = locale.InitLocalizer(i18nFS, &s.settingService)
+	err = locale.InitLocalizer(i18nFS)
 	if err != nil {
 		return nil, err
 	}

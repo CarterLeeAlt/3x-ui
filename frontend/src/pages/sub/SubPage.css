@@ -158,10 +158,6 @@
   text-align: center;
 }
 
-.settings-popover {
-  min-width: 220px;
-}
-
 .theme-cycle {
   width: 32px;
   height: 32px;
@@ -199,8 +195,4 @@
 .is-dark .theme-cycle:focus-visible {
   background-color: rgba(64, 150, 255, 0.1);
   color: #4096ff;
-}
-
-.lang-select {
-  width: 100%;
 }

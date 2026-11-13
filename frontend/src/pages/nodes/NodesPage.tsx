@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import zhCN from 'antd/locale/zh_CN';
 import { Card, Col, ConfigProvider, Layout, Modal, Row, Spin, message } from 'antd';
 import {
   CheckCircleOutlined,
@@ -108,7 +109,7 @@ export default function NodesPage() {
   }, [isDark, isUltra]);
 
   return (
-    <ConfigProvider theme={antdThemeConfig}>
+    <ConfigProvider theme={antdThemeConfig} locale={zhCN}>
       {messageContextHolder}
       {modalContextHolder}
       <Layout className={pageClass}>

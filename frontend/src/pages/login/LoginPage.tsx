@@ -1,23 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import zhCN from 'antd/locale/zh_CN';
 import {
   Button,
   ConfigProvider,
   Form,
   Input,
   Layout,
-  Popover,
   Spin,
   message,
 } from 'antd';
 import {
   KeyOutlined,
   LockOutlined,
-  TranslationOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 
-import { HttpUtil, LanguageManager } from '@/utils';
+import { HttpUtil } from '@/utils';
 import { setMessageInstance } from '@/utils/messageBus';
 import { pauseAnimationsUntilLeave, useTheme } from '@/hooks/useTheme';
 import './LoginPage.css';
@@ -45,7 +44,6 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [twoFactorEnable, setTwoFactorEnable] = useState(false);
   const [headlineIndex, setHeadlineIndex] = useState(0);
-  const [lang, setLang] = useState<string>(() => LanguageManager.getLanguage());
 
   const headlineWords = useMemo(
     () => [t('pages.login.hello'), t('pages.login.title')],
@@ -80,11 +78,6 @@ export default function LoginPage() {
     }
   }, []);
 
-  const onLangChange = useCallback((next: string) => {
-    setLang(next);
-    LanguageManager.setLanguage(next);
-  }, []);
-
   const cycleTheme = useCallback(() => {
     pauseAnimationsUntilLeave('login-theme-cycle');
     if (!isDark) {
@@ -105,11 +98,6 @@ export default function LoginPage() {
     return classes.join(' ');
   }, [isDark, isUltra]);
 
-  const langList = useMemo(
-    () => LanguageManager.supportedLanguages as { value: string; name: string; icon: string }[],
-    [],
-  );
-
   const themeIcon = !isDark ? (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="4" />
@@ -127,7 +115,7 @@ export default function LoginPage() {
   );
 
   return (
-    <ConfigProvider theme={antdThemeConfig}>
+    <ConfigProvider theme={antdThemeConfig} locale={zhCN}>
       {messageContextHolder}
       <Layout className={pageClass}>
         <Layout.Content className="login-content">
@@ -142,35 +130,6 @@ export default function LoginPage() {
             >
               {themeIcon}
             </button>
-            <Popover
-              rootClassName={isDark ? 'dark' : 'light'}
-              placement="bottomRight"
-              trigger="click"
-              content={
-                <ul className="lang-list">
-                  {langList.map((l) => (
-                    <li key={l.value}>
-                      <button
-                        type="button"
-                        className={`lang-item${lang === l.value ? ' is-active' : ''}`}
-                        onClick={() => onLangChange(l.value)}
-                      >
-                        <span className="lang-item-icon" aria-hidden="true">{l.icon}</span>
-                        <span className="lang-item-name">{l.name}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              }
-            >
-              <Button
-                shape="circle"
-                size="large"
-                className="toolbar-btn"
-                aria-label={t('pages.settings.language')}
-                icon={<TranslationOutlined />}
-              />
-            </Popover>
           </div>
 
           <div className="login-wrapper">

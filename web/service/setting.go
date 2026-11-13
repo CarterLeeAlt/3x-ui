@@ -50,7 +50,7 @@ var defaultValueMap = map[string]string{
 	"tgBotBackup":                 "false",
 	"tgBotLoginNotify":            "true",
 	"tgCpu":                       "80",
-	"tgLang":                      "en-US",
+	"tgLang":                      "zh-CN",
 	"twoFactorEnable":             "false",
 	"twoFactorToken":              "",
 	"subEnable":                   "true",
@@ -393,10 +393,6 @@ func (s *SettingService) GetTgBotLoginNotify() (bool, error) {
 
 func (s *SettingService) GetTgCpu() (int, error) {
 	return s.getInt("tgCpu")
-}
-
-func (s *SettingService) GetTgLang() (string, error) {
-	return s.getString("tgLang")
 }
 
 func (s *SettingService) GetTwoFactorEnable() (bool, error) {

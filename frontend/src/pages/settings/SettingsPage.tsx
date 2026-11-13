@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import zhCN from 'antd/locale/zh_CN';
 import {
   Alert,
   Button,
@@ -266,7 +267,7 @@ export default function SettingsPage() {
   }, [allSetting, updateSetting, isMobile, t]);
 
   return (
-    <ConfigProvider theme={antdThemeConfig}>
+    <ConfigProvider theme={antdThemeConfig} locale={zhCN}>
       {messageContextHolder}
       {modalContextHolder}
       <Layout className={pageClass}>

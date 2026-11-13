@@ -9,7 +9,7 @@ import {
   Switch,
 } from 'antd';
 import type { AllSetting } from '@/models/setting';
-import { HttpUtil, LanguageManager } from '@/utils';
+import { HttpUtil } from '@/utils';
 import SettingListItem from '@/components/SettingListItem';
 
 interface ApiMsg<T = unknown> {
@@ -32,7 +32,6 @@ const DATEPICKER_LIST: { name: string; value: 'gregorian' | 'jalalian' }[] = [
 export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProps) {
   const { t } = useTranslation();
 
-  const [lang, setLang] = useState<string>(() => LanguageManager.getLanguage());
   const [inboundOptions, setInboundOptions] = useState<{ label: string; value: string }[]>([]);
 
   useEffect(() => {
@@ -88,24 +87,6 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
   function setLdapInboundTagList(list: string[]) {
     updateSetting({ ldapInboundTags: Array.isArray(list) ? list.join(',') : '' });
   }
-
-  function onLangChange(value: string) {
-    setLang(value);
-    LanguageManager.setLanguage(value);
-  }
-
-  const langOptions = useMemo(
-    () => LanguageManager.supportedLanguages.map((l: { value: string; name: string; icon: string }) => ({
-      value: l.value,
-      label: (
-        <>
-          <span role="img" aria-label={l.name}>{l.icon}</span>
-          &nbsp;&nbsp;<span>{l.name}</span>
-        </>
-      ),
-    })),
-    [],
-  );
 
   return (
     <Collapse defaultActiveKey="1" items={[
@@ -175,14 +156,6 @@ export default function GeneralTab({ allSetting, updateSetting }: GeneralTabProp
                 onChange={(v) => updateSetting({ pageSize: Number(v) || 0 })} />
             </SettingListItem>
 
-            <SettingListItem paddings="small" title={t('pages.settings.language')}>
-              <Select
-                value={lang}
-                onChange={onLangChange}
-                style={{ width: '100%' }}
-                options={langOptions}
-              />
-            </SettingListItem>
           </>
         ),
       },

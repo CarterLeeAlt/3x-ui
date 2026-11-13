@@ -1,7 +1,5 @@
-import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Collapse, Input, InputNumber, Select, Switch } from 'antd';
-import { LanguageManager } from '@/utils';
+import { Collapse, Input, InputNumber, Switch } from 'antd';
 import type { AllSetting } from '@/models/setting';
 import SettingListItem from '@/components/SettingListItem';
 
@@ -12,19 +10,6 @@ interface TelegramTabProps {
 
 export default function TelegramTab({ allSetting, updateSetting }: TelegramTabProps) {
   const { t } = useTranslation();
-
-  const langOptions = useMemo(
-    () => LanguageManager.supportedLanguages.map((l: { value: string; name: string; icon: string }) => ({
-      value: l.value,
-      label: (
-        <>
-          <span role="img" aria-label={l.name}>{l.icon}</span>
-          &nbsp;&nbsp;<span>{l.name}</span>
-        </>
-      ),
-    })),
-    [],
-  );
 
   return (
     <Collapse defaultActiveKey="1" items={[
@@ -53,14 +38,6 @@ export default function TelegramTab({ allSetting, updateSetting }: TelegramTabPr
               <Input value={allSetting.tgBotChatId} onChange={(e) => updateSetting({ tgBotChatId: e.target.value })} />
             </SettingListItem>
 
-            <SettingListItem paddings="small" title={t('pages.settings.telegramBotLanguage')}>
-              <Select
-                value={allSetting.tgLang}
-                onChange={(v) => updateSetting({ tgLang: v })}
-                style={{ width: '100%' }}
-                options={langOptions}
-              />
-            </SettingListItem>
           </>
         ),
       },

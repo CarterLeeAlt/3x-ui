@@ -1,42 +1,21 @@
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import dayjs from 'dayjs';
+import 'dayjs/locale/zh-cn';
 
-import { LanguageManager } from '@/utils';
-import enUS from '../../../web/translation/en-US.json';
+import zhCN from '../../../web/translation/zh-CN.json';
 
-const FALLBACK = 'en-US';
-
-const lazyModules = import.meta.glob([
-  '../../../web/translation/*.json',
-  '!../../../web/translation/en-US.json',
-]);
-
-function moduleKeyFor(code: string): string {
-  return `../../../web/translation/${code}.json`;
-}
-
-let active: string = LanguageManager.getLanguage();
-if (active !== FALLBACK && !Object.prototype.hasOwnProperty.call(lazyModules, moduleKeyFor(active))) {
-  active = FALLBACK;
-}
+const LANGUAGE = 'zh-CN';
+dayjs.locale('zh-cn');
 
 export async function readyI18n() {
   await i18next.use(initReactI18next).init({
-    lng: active,
-    fallbackLng: FALLBACK,
-    resources: { [FALLBACK]: { translation: enUS } },
+    lng: LANGUAGE,
+    fallbackLng: LANGUAGE,
+    resources: { [LANGUAGE]: { translation: zhCN } },
     interpolation: { escapeValue: false, prefix: '{', suffix: '}' },
     returnNull: false,
   });
-  if (active !== FALLBACK) {
-    const loader = lazyModules[moduleKeyFor(active)] as (() => Promise<{ default: Record<string, unknown> }>) | undefined;
-    if (loader) {
-      const mod = await loader();
-      const messages = (mod.default ?? mod) as Record<string, unknown>;
-      i18next.addResourceBundle(active, 'translation', messages, true, true);
-      await i18next.changeLanguage(active);
-    }
-  }
   return i18next;
 }
 

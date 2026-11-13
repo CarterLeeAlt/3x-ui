@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ComponentType, MouseEvent } from 'react';
 import { Button, Card, ConfigProvider, Input, Layout, Space } from 'antd';
+import zhCN from 'antd/locale/zh_CN';
 import {
   ApiOutlined,
   CloudServerOutlined,
@@ -146,7 +147,7 @@ export default function ApiDocsPage() {
   }, [isDark, isUltra]);
 
   return (
-    <ConfigProvider theme={antdThemeConfig}>
+    <ConfigProvider theme={antdThemeConfig} locale={zhCN}>
       <Layout className={pageClass}>
         <AppSidebar basePath={basePath} requestUri={requestUri} />
 

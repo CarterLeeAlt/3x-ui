@@ -1,5 +1,6 @@
 import { lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import zhCN from 'antd/locale/zh_CN';
 import {
   Badge,
   Button,
@@ -610,7 +611,7 @@ export default function ClientsPage() {
   }
 
   return (
-    <ConfigProvider theme={antdThemeConfig}>
+    <ConfigProvider theme={antdThemeConfig} locale={zhCN}>
       {messageContextHolder}
       {modalContextHolder}
       <Layout className={pageClass}>

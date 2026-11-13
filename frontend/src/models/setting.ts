@@ -23,7 +23,7 @@ export class AllSetting {
   tgBotBackup = false;
   tgBotLoginNotify = true;
   tgCpu = 80;
-  tgLang = 'en-US';
+  tgLang = 'zh-CN';
   twoFactorEnable = false;
   twoFactorToken = '';
   xrayTemplateConfig = '';

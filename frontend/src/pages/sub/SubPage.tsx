@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import zhCN from 'antd/locale/zh_CN';
 import {
   Button,
   Card,
@@ -9,10 +10,8 @@ import {
   Dropdown,
   Layout,
   message,
-  Popover,
   QRCode,
   Row,
-  Select,
   Space,
   Tag,
 } from 'antd';
@@ -21,10 +20,9 @@ import {
   AppleOutlined,
   CopyOutlined,
   DownOutlined,
-  SettingOutlined,
 } from '@ant-design/icons';
 
-import { ClipboardManager, IntlUtil, LanguageManager } from '@/utils';
+import { ClipboardManager, IntlUtil } from '@/utils';
 import { setMessageInstance } from '@/utils/messageBus';
 import { pauseAnimationsUntilLeave, useTheme } from '@/hooks/useTheme';
 import './SubPage.css';
@@ -83,17 +81,11 @@ export default function SubPage() {
   useEffect(() => { setMessageInstance(messageApi); }, [messageApi]);
 
   const [isMobile, setIsMobile] = useState<boolean>(() => window.innerWidth < 576);
-  const [lang, setLang] = useState<string>(() => LanguageManager.getLanguage());
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 576);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  const onLangChange = useCallback((next: string) => {
-    setLang(next);
-    LanguageManager.setLanguage(next);
   }, []);
 
   const cycleTheme = useCallback(() => {
@@ -206,19 +198,6 @@ export default function SubPage() {
     { key: 'ios-happ', label: 'Happ', onClick: () => open(happUrl) },
   ], [copy, open, shadowrocketUrl, v2boxUrl, streisandUrl, happUrl]);
 
-  const langOptions = useMemo(
-    () => LanguageManager.supportedLanguages.map((l: { value: string; name: string; icon: string }) => ({
-      value: l.value,
-      label: (
-        <>
-          <span aria-label={l.name}>{l.icon}</span>
-          &nbsp;&nbsp;<span>{l.name}</span>
-        </>
-      ),
-    })),
-    [],
-  );
-
   const themeIcon = !isDark ? (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="12" cy="12" r="4" />
@@ -254,28 +233,11 @@ export default function SubPage() {
       >
         {themeIcon}
       </button>
-      <Popover
-        title={t('pages.settings.language')}
-        placement="bottomRight"
-        trigger="click"
-        content={
-          <Space orientation="vertical" size={10} className="settings-popover">
-            <Select
-              className="lang-select"
-              value={lang}
-              onChange={onLangChange}
-              options={langOptions}
-            />
-          </Space>
-        }
-      >
-        <Button shape="circle" icon={<SettingOutlined />} />
-      </Popover>
     </Space>
   );
 
   return (
-    <ConfigProvider theme={antdThemeConfig}>
+    <ConfigProvider theme={antdThemeConfig} locale={zhCN}>
       {messageContextHolder}
       <Layout className={pageClass}>
         <Layout.Content className="content">
