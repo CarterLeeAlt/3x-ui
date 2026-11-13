@@ -25,11 +25,11 @@ As an enhanced fork of the original X-UI project, 3X-UI provides improved stabil
 ## Quick Start
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/CarterLeeAlt/3x-ui/main/install.sh)
 ```
 or
 ```bash
-VERSION=v2.9.4 && bash <(curl -Ls "https://raw.githubusercontent.com/CarterLeeAlt/3x-ui/master/install.sh") $VERSION
+VERSION=v2.9.5 && bash <(curl -Ls "https://raw.githubusercontent.com/CarterLeeAlt/3x-ui/main/install.sh") $VERSION
 ```
 For full documentation, please visit the [project Wiki](https://github.com/MHSanaei/3x-ui/wiki).
 
