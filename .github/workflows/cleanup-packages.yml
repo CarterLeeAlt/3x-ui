@@ -64,8 +64,15 @@ jobs:
               throw new Error('created_before must be a valid UTC timestamp in the past.');
             }
             const oldVersions = versions.filter(version => Date.parse(version.created_at) < cutoff);
-            for (const version of oldVersions) {
+            const newestTagged = versions
+              .filter(version => version.metadata.container.tags.length > 0)
+              .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))[0];
+            const removable = oldVersions.filter(version => version.id !== newestTagged?.id);
+            for (const version of removable) {
               await github.request('DELETE /users/{username}/packages/{package_type}/{package_name}/versions/{package_version_id}', { ...parameters, package_version_id: version.id });
               core.info(`Deleted container image version ${version.id}.`);
             }
-            core.info(`Deleted ${oldVersions.length} old container image versions.`);
+            core.info(`Deleted ${removable.length} old container image versions.`);
+            if (oldVersions.some(version => version.id === newestTagged?.id)) {
+              core.info(`Retained tagged version ${newestTagged.id} until its replacement is published; GHCR requires a tagged version to remain.`);
+            }
