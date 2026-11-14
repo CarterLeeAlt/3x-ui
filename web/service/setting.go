@@ -12,14 +12,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/database"
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	"github.com/mhsanaei/3x-ui/v3/util/common"
-	"github.com/mhsanaei/3x-ui/v3/util/random"
-	"github.com/mhsanaei/3x-ui/v3/util/reflect_util"
-	"github.com/mhsanaei/3x-ui/v3/web/entity"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/mhsanaei/3x-ui/v2/database"
+	"github.com/mhsanaei/3x-ui/v2/database/model"
+	"github.com/mhsanaei/3x-ui/v2/logger"
+	"github.com/mhsanaei/3x-ui/v2/util/common"
+	"github.com/mhsanaei/3x-ui/v2/util/random"
+	"github.com/mhsanaei/3x-ui/v2/util/reflect_util"
+	"github.com/mhsanaei/3x-ui/v2/web/entity"
+	"github.com/mhsanaei/3x-ui/v2/xray"
 )
 
 //go:embed config.json
@@ -33,10 +33,8 @@ var defaultValueMap = map[string]string{
 	"webCertFile":                 "",
 	"webKeyFile":                  "",
 	"secret":                      random.Seq(32),
-	"apiToken":                    "",
 	"webBasePath":                 "/",
 	"sessionMaxAge":               "360",
-	"trustedProxyCIDRs":           "127.0.0.1/32,::1/128",
 	"pageSize":                    "25",
 	"expireDiff":                  "0",
 	"trafficDiff":                 "0",
@@ -51,7 +49,7 @@ var defaultValueMap = map[string]string{
 	"tgBotBackup":                 "false",
 	"tgBotLoginNotify":            "true",
 	"tgCpu":                       "80",
-	"tgLang":                      "zh-CN",
+	"tgLang":                      "en-US",
 	"twoFactorEnable":             "false",
 	"twoFactorToken":              "",
 	"subEnable":                   "true",
@@ -71,7 +69,6 @@ var defaultValueMap = map[string]string{
 	"subUpdates":                  "12",
 	"subEncrypt":                  "true",
 	"subShowInfo":                 "true",
-	"subEmailInRemark":            "true",
 	"subURI":                      "",
 	"subJsonPath":                 "/json/",
 	"subJsonURI":                  "",
@@ -204,35 +201,6 @@ func (s *SettingService) GetAllSetting() (*entity.AllSetting, error) {
 	return allSetting, nil
 }
 
-func (s *SettingService) GetAllSettingView() (*entity.AllSettingView, error) {
-	allSetting, err := s.GetAllSetting()
-	if err != nil {
-		return nil, err
-	}
-	view := &entity.AllSettingView{AllSetting: *allSetting}
-	view.HasTgBotToken = secretConfigured(allSetting.TgBotToken)
-	view.HasTwoFactorToken = secretConfigured(allSetting.TwoFactorToken)
-	view.HasLdapPassword = secretConfigured(allSetting.LdapPassword)
-	view.HasWarpSecret = secretConfigured(mustString(s.GetWarp()))
-	view.HasNordSecret = secretConfigured(mustString(s.GetNord()))
-	var apiTokenCount int64
-	if err := database.GetDB().Model(model.ApiToken{}).Where("enabled = ?", true).Count(&apiTokenCount).Error; err == nil {
-		view.HasApiToken = apiTokenCount > 0
-	}
-	view.TgBotToken = ""
-	view.TwoFactorToken = ""
-	view.LdapPassword = ""
-	return view, nil
-}
-
-func secretConfigured(value string) bool {
-	return strings.TrimSpace(value) != ""
-}
-
-func mustString(value string, _ error) string {
-	return value
-}
-
 func (s *SettingService) ResetSettings() error {
 	db := database.GetDB()
 	err := db.Where("1 = 1").Delete(model.Setting{}).Error
@@ -320,11 +288,7 @@ func (s *SettingService) GetXrayOutboundTestUrl() (string, error) {
 }
 
 func (s *SettingService) SetXrayOutboundTestUrl(url string) error {
-	clean, err := SanitizeHTTPURL(url)
-	if err != nil {
-		return err
-	}
-	return s.setString("xrayOutboundTestUrl", clean)
+	return s.setString("xrayOutboundTestUrl", url)
 }
 
 func (s *SettingService) GetListen() (string, error) {
@@ -335,17 +299,10 @@ func (s *SettingService) GetListen() (string, error) {
 }
 
 func (s *SettingService) SetListen(ip string) error {
-	if err := validatePanelListen(ip); err != nil {
-		return err
+	if runtime.GOOS == "windows" && ip != "127.0.0.1" {
+		return errors.New("Windows 管理面板仅允许监听 127.0.0.1")
 	}
 	return s.setString("webListen", ip)
-}
-
-func validatePanelListen(ip string) error {
-	if runtime.GOOS == "windows" && ip != "127.0.0.1" {
-		return errors.New("Windows 管理面板的监听地址固定为 127.0.0.1")
-	}
-	return nil
 }
 
 func (s *SettingService) GetWebDomain() (string, error) {
@@ -412,6 +369,10 @@ func (s *SettingService) GetTgCpu() (int, error) {
 	return s.getInt("tgCpu")
 }
 
+func (s *SettingService) GetTgLang() (string, error) {
+	return s.getString("tgLang")
+}
+
 func (s *SettingService) GetTwoFactorEnable() (bool, error) {
 	return s.getBool("twoFactorEnable")
 }
@@ -462,10 +423,6 @@ func (s *SettingService) GetTrafficDiff() (int, error) {
 
 func (s *SettingService) GetSessionMaxAge() (int, error) {
 	return s.getInt("sessionMaxAge")
-}
-
-func (s *SettingService) GetTrustedProxyCIDRs() (string, error) {
-	return s.getString("trustedProxyCIDRs")
 }
 
 func (s *SettingService) GetRemarkModel() (string, error) {
@@ -604,10 +561,6 @@ func (s *SettingService) GetSubEncrypt() (bool, error) {
 
 func (s *SettingService) GetSubShowInfo() (bool, error) {
 	return s.getBool("subShowInfo")
-}
-
-func (s *SettingService) GetSubEmailInRemark() (bool, error) {
-	return s.getBool("subEmailInRemark")
 }
 
 func (s *SettingService) GetPageSize() (int, error) {
@@ -784,14 +737,8 @@ func (s *SettingService) GetLdapDefaultLimitIP() (int, error) {
 }
 
 func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
-	if err := validatePanelListen(allSetting.WebListen); err != nil {
-		return err
-	}
-	if err := s.preserveRedactedSecrets(allSetting); err != nil {
-		return err
-	}
-	if err := validateSettingsURLs(allSetting); err != nil {
-		return err
+	if runtime.GOOS == "windows" && allSetting.WebListen != "127.0.0.1" {
+		return errors.New("Windows 管理面板仅允许监听 127.0.0.1")
 	}
 	if err := allSetting.CheckValid(); err != nil {
 		return err
@@ -811,58 +758,6 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 		}
 	}
 	return common.Combine(errs...)
-}
-
-func (s *SettingService) preserveRedactedSecrets(allSetting *entity.AllSetting) error {
-	if strings.TrimSpace(allSetting.TgBotToken) == "" {
-		value, err := s.GetTgBotToken()
-		if err != nil {
-			return err
-		}
-		allSetting.TgBotToken = value
-	}
-	if strings.TrimSpace(allSetting.LdapPassword) == "" {
-		value, err := s.GetLdapPassword()
-		if err != nil {
-			return err
-		}
-		allSetting.LdapPassword = value
-	}
-	if allSetting.TwoFactorEnable && strings.TrimSpace(allSetting.TwoFactorToken) == "" {
-		value, err := s.GetTwoFactorToken()
-		if err != nil {
-			return err
-		}
-		allSetting.TwoFactorToken = value
-	}
-	return nil
-}
-
-func validateSettingsURLs(allSetting *entity.AllSetting) error {
-	if allSetting.ExternalTrafficInformURI != "" {
-		u, err := SanitizeHTTPURL(allSetting.ExternalTrafficInformURI)
-		if err != nil {
-			return common.NewError("external traffic inform URI is invalid:", err)
-		}
-		allSetting.ExternalTrafficInformURI = u
-	}
-	if allSetting.TgBotAPIServer != "" {
-		u, err := SanitizeHTTPURL(allSetting.TgBotAPIServer)
-		if err != nil {
-			return common.NewError("telegram API server URL is invalid:", err)
-		}
-		allSetting.TgBotAPIServer = u
-	}
-	return nil
-}
-
-func (s *SettingService) UpdateSecret(key string, value string) error {
-	switch key {
-	case "tgBotToken", "ldapPassword", "twoFactorToken":
-		return s.saveSetting(key, strings.TrimSpace(value))
-	default:
-		return common.NewError("secret key is not replaceable:", key)
-	}
 }
 
 func (s *SettingService) GetDefaultXrayConfig() (any, error) {

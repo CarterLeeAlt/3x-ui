@@ -179,20 +179,6 @@ delete_script() {
     exit 1
 }
 
-xui_env_file_path() {
-    case "${release}" in
-        ubuntu | debian | armbian)
-            echo "/etc/default/x-ui"
-            ;;
-        arch | manjaro | parch | alpine)
-            echo "/etc/conf.d/x-ui"
-            ;;
-        *)
-            echo "/etc/sysconfig/x-ui"
-            ;;
-    esac
-}
-
 uninstall() {
     confirm "Are you sure you want to uninstall the panel? xray will also uninstalled!" "n"
     if [[ $? != 0 ]]; then
@@ -216,12 +202,11 @@ uninstall() {
 
     rm /etc/x-ui/ -rf
     rm ${xui_folder}/ -rf
-    rm -f "$(xui_env_file_path)"
 
     echo ""
     echo -e "Uninstalled Successfully.\n"
     echo "If you need to install this panel again, you can use below command:"
-    echo -e "${green}bash <(curl -Ls https://raw.githubusercontent.com/CarterLeeAlt/3x-ui/master/install.sh)${plain}"
+    echo -e "${green}bash <(curl -Ls https://raw.githubusercontent.com/CarterLeeAlt/3x-ui/main/install.sh)${plain}"
     echo ""
     # Trap the SIGTERM signal
     trap delete_script SIGTERM
@@ -304,50 +289,12 @@ check_config() {
     fi
     LOGI "${info}"
 
-    local db_env_file
-    db_env_file="$(xui_env_file_path)"
-    if [[ -r "$db_env_file" ]] && grep -q '^XUI_DB_TYPE=postgres' "$db_env_file"; then
-        local dsn
-        dsn="$(grep -E '^XUI_DB_DSN=' "$db_env_file" | head -1 | cut -d= -f2-)"
-        local dsn_safe
-        dsn_safe="$(echo "$dsn" | sed -E 's|(://[^:/@]+:)[^@]+@|\1****@|')"
-        echo -e "${green}Database: PostgreSQL — ${dsn_safe}${plain}"
-    else
-        echo -e "${green}Database: SQLite (/etc/x-ui/x-ui.db)${plain}"
-    fi
-
     local existing_webBasePath=$(echo "$info" | grep -Eo 'webBasePath: .+' | awk '{print $2}')
     local existing_port=$(echo "$info" | grep -Eo 'port: .+' | awk '{print $2}')
     local existing_cert=$(${xui_folder}/x-ui setting -getCert true | grep 'cert:' | awk -F': ' '{print $2}' | tr -d '[:space:]')
-    local URL_lists=(
-        "https://api4.ipify.org"
-        "https://ipv4.icanhazip.com"
-        "https://v4.api.ipinfo.io/ip"
-        "https://ipv4.myexternalip.com/raw"
-        "https://4.ident.me"
-        "https://check-host.net/ip"
-    )
-    local server_ip=""
-    for ip_address in "${URL_lists[@]}"; do
-        local response=$(curl -s -w "\n%{http_code}" --max-time 3 "${ip_address}" 2> /dev/null)
-        local http_code=$(echo "$response" | tail -n1)
-        local ip_result=$(echo "$response" | head -n-1 | tr -d '[:space:]"')
-        if [[ "${http_code}" == "200" && "${ip_result}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            server_ip="${ip_result}"
-            break
-        fi
-    done
-
-    if [[ -z "$server_ip" ]]; then
-        echo -e "${yellow}Could not auto-detect server IP from any provider.${plain}"
-        while [[ -z "$server_ip" ]]; do
-            read -rp "Please enter your server's public IPv4 address: " server_ip
-            server_ip="${server_ip// /}"
-            if [[ ! "$server_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo -e "${red}Invalid IPv4 address. Please try again.${plain}"
-                server_ip=""
-            fi
-        done
+    local server_ip=$(curl -s --max-time 3 https://api.ipify.org)
+    if [ -z "$server_ip" ]; then
+        server_ip=$(curl -s --max-time 3 https://4.ident.me)
     fi
 
     if [[ -n "$existing_cert" ]]; then
@@ -363,16 +310,16 @@ check_config() {
         echo -e "${yellow}You can get a Let's Encrypt certificate for your IP address (valid ~6 days, auto-renews).${plain}"
         read -rp "Generate SSL certificate for IP now? [y/N]: " gen_ssl
         if [[ "$gen_ssl" == "y" || "$gen_ssl" == "Y" ]]; then
-            stop 0 > /dev/null 2>&1
+            stop > /dev/null 2>&1
             ssl_cert_issue_for_ip
             if [[ $? -eq 0 ]]; then
                 echo -e "${green}Access URL: https://${server_ip}:${existing_port}${existing_webBasePath}${plain}"
                 # ssl_cert_issue_for_ip already restarts the panel, but ensure it's running
-                start 0 > /dev/null 2>&1
+                start > /dev/null 2>&1
             else
                 LOGE "IP certificate setup failed."
                 echo -e "${yellow}You can try again via option 19 (SSL Certificate Management).${plain}"
-                start 0 > /dev/null 2>&1
+                start > /dev/null 2>&1
             fi
         else
             echo -e "${yellow}Access URL: http://${server_ip}:${existing_port}${existing_webBasePath}${plain}"
@@ -463,11 +410,7 @@ restart() {
 }
 
 restart_xray() {
-    if [[ $release == "alpine" ]]; then
-        rc-service x-ui reload
-    else
-        systemctl reload x-ui
-    fi
+    systemctl reload x-ui
     LOGI "xray-core Restart signal sent successfully, Please check the log information to confirm whether xray restarted successfully"
     sleep 2
     show_xray_status
@@ -1196,35 +1139,14 @@ ssl_cert_issue_for_ip() {
     local existing_port=$(${xui_folder}/x-ui setting -show true | grep -Eo 'port: .+' | awk '{print $2}')
 
     # Get server IP
-    local URL_lists=(
-        "https://api4.ipify.org"
-        "https://ipv4.icanhazip.com"
-        "https://v4.api.ipinfo.io/ip"
-        "https://ipv4.myexternalip.com/raw"
-        "https://4.ident.me"
-        "https://check-host.net/ip"
-    )
-    local server_ip=""
-    for ip_address in "${URL_lists[@]}"; do
-        local response=$(curl -s -w "\n%{http_code}" --max-time 3 "${ip_address}" 2> /dev/null)
-        local http_code=$(echo "$response" | tail -n1)
-        local ip_result=$(echo "$response" | head -n-1 | tr -d '[:space:]"')
-        if [[ "${http_code}" == "200" && "${ip_result}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            server_ip="${ip_result}"
-            break
-        fi
-    done
+    local server_ip=$(curl -s --max-time 3 https://api.ipify.org)
+    if [ -z "$server_ip" ]; then
+        server_ip=$(curl -s --max-time 3 https://4.ident.me)
+    fi
 
-    if [[ -z "$server_ip" ]]; then
-        LOGI "Could not auto-detect server IP from any provider."
-        while [[ -z "$server_ip" ]]; do
-            read -rp "Please enter your server's public IPv4 address: " server_ip
-            server_ip="${server_ip// /}"
-            if [[ ! "$server_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                LOGE "Invalid IPv4 address. Please try again."
-                server_ip=""
-            fi
-        done
+    if [ -z "$server_ip" ]; then
+        LOGE "Failed to get server IP address"
+        return 1
     fi
 
     LOGI "Server IP detected: ${server_ip}"
@@ -2112,7 +2034,7 @@ backend=auto
 filter=3x-ipl
 action=3x-ipl
 logpath=${iplimit_log_path}
-maxretry=1
+maxretry=2
 findtime=32
 bantime=${bantime}m
 EOF
@@ -2182,24 +2104,12 @@ SSH_port_forwarding() {
     for ip_address in "${URL_lists[@]}"; do
         local response=$(curl -s -w "\n%{http_code}" --max-time 3 "${ip_address}" 2> /dev/null)
         local http_code=$(echo "$response" | tail -n1)
-        local ip_result=$(echo "$response" | head -n-1 | tr -d '[:space:]"')
-        if [[ "${http_code}" == "200" && "${ip_result}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        local ip_result=$(echo "$response" | head -n-1 | tr -d '[:space:]')
+        if [[ "${http_code}" == "200" && -n "${ip_result}" ]]; then
             server_ip="${ip_result}"
             break
         fi
     done
-
-    if [[ -z "$server_ip" ]]; then
-        echo -e "${yellow}Could not auto-detect server IP from any provider.${plain}"
-        while [[ -z "$server_ip" ]]; do
-            read -rp "Please enter your server's public IPv4 address: " server_ip
-            server_ip="${server_ip// /}"
-            if [[ ! "$server_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo -e "${red}Invalid IPv4 address. Please try again.${plain}"
-                server_ip=""
-            fi
-        done
-    fi
 
     local existing_webBasePath=$(${xui_folder}/x-ui setting -show true | grep -Eo 'webBasePath: .+' | awk '{print $2}')
     local existing_port=$(${xui_folder}/x-ui setting -show true | grep -Eo 'port: .+' | awk '{print $2}')

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/util/common"
+	"github.com/mhsanaei/3x-ui/v2/util/common"
 )
 
 type NordService struct {
@@ -25,9 +25,6 @@ func (s *NordService) GetCountries() (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", common.NewErrorf("NordVPN API error: %s", resp.Status)
-	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		return "", err
@@ -48,9 +45,6 @@ func (s *NordService) GetServers(countryId string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", common.NewErrorf("NordVPN API error: %s", resp.Status)
-	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		return "", err
@@ -103,7 +97,8 @@ func (s *NordService) GetCredentials(token string) (string, error) {
 	}
 	req.SetBasicAuth("token", token)
 
-	resp, err := nordHTTPClient.Do(req)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

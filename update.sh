@@ -105,31 +105,6 @@ gen_random_string() {
         | head -c "$length"
 }
 
-xui_env_file_path() {
-    case "${release}" in
-        ubuntu | debian | armbian)
-            echo "/etc/default/x-ui"
-            ;;
-        arch | manjaro | parch | alpine)
-            echo "/etc/conf.d/x-ui"
-            ;;
-        *)
-            echo "/etc/sysconfig/x-ui"
-            ;;
-    esac
-}
-
-load_xui_env() {
-    local env_file
-    env_file="$(xui_env_file_path)"
-    if [[ -r "$env_file" ]]; then
-        set -a
-        # shellcheck disable=SC1090
-        source "$env_file"
-        set +a
-    fi
-}
-
 install_base() {
     echo -e "${green}Updating and install dependency packages...${plain}"
     case "${release}" in
@@ -736,24 +711,12 @@ config_after_update() {
     for ip_address in "${URL_lists[@]}"; do
         local response=$(curl -s -w "\n%{http_code}" --max-time 3 "${ip_address}" 2> /dev/null)
         local http_code=$(echo "$response" | tail -n1)
-        local ip_result=$(echo "$response" | head -n-1 | tr -d '[:space:]"')
-        if [[ "${http_code}" == "200" && "${ip_result}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        local ip_result=$(echo "$response" | head -n-1 | tr -d '[:space:]')
+        if [[ "${http_code}" == "200" && -n "${ip_result}" ]]; then
             server_ip="${ip_result}"
             break
         fi
     done
-
-    if [[ -z "$server_ip" ]]; then
-        echo -e "${yellow}Could not auto-detect server IP from any provider.${plain}"
-        while [[ -z "$server_ip" ]]; do
-            read -rp "Please enter your server's public IPv4 address: " server_ip
-            server_ip="${server_ip// /}"
-            if [[ ! "$server_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo -e "${red}Invalid IPv4 address. Please try again.${plain}"
-                server_ip=""
-            fi
-        done
-    fi
 
     # Handle missing/short webBasePath
     if [[ ${#existing_webBasePath} -lt 4 ]]; then
@@ -773,6 +736,12 @@ config_after_update() {
         echo -e "${yellow}For security, SSL certificate is MANDATORY for all panels.${plain}"
         echo -e "${yellow}Let's Encrypt now supports both domains and IP addresses!${plain}"
         echo ""
+
+        if [[ -z "${server_ip}" ]]; then
+            echo -e "${red}Failed to detect server IP${plain}"
+            echo -e "${yellow}Please configure SSL manually using: x-ui${plain}"
+            return
+        fi
 
         # Prompt and setup SSL (domain or IP)
         prompt_and_setup_ssl "${existing_port}" "${existing_webBasePath}" "${server_ip}"
@@ -799,8 +768,6 @@ config_after_update() {
 
 update_x-ui() {
     cd ${xui_folder%/x-ui}/
-
-    load_xui_env
 
     if [ -f "${xui_folder}/x-ui" ]; then
         current_xui_version=$(${xui_folder}/x-ui -v)

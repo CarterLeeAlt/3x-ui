@@ -3,10 +3,9 @@ package service
 import (
 	_ "embed"
 	"encoding/json"
-	"slices"
 
-	"github.com/mhsanaei/3x-ui/v3/util/common"
-	"github.com/mhsanaei/3x-ui/v3/xray"
+	"github.com/mhsanaei/3x-ui/v2/util/common"
+	"github.com/mhsanaei/3x-ui/v2/xray"
 )
 
 // XraySettingService provides business logic for Xray configuration management.
@@ -56,7 +55,7 @@ func (s *XraySettingService) CheckXrayConfig(XrayTemplateConfig string) error {
 // If `raw` does not look like a wrapper, it is returned unchanged.
 func UnwrapXrayTemplateConfig(raw string) string {
 	const maxDepth = 8 // defensive cap against pathological multi-nest values
-	for range maxDepth {
+	for i := 0; i < maxDepth; i++ {
 		var top map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(raw), &top); err != nil {
 			return raw
@@ -191,8 +190,10 @@ func findApiRule(rules []map[string]any) int {
 				}
 			}
 		case []string:
-			if slices.Contains(tags, "api") {
-				return i
+			for _, s := range tags {
+				if s == "api" {
+					return i
+				}
 			}
 		case string:
 			if tags == "api" {

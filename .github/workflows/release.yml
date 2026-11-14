@@ -65,23 +65,6 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
-      # Frontend dist must be built BEFORE go build — Go's //go:embed
-      # all:dist directive in web/web.go requires web/dist/ to exist
-      # at compile time. web/dist/ is .gitignored, so on a fresh CI
-      # checkout it doesn't exist until vite emits it.
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend bundle
-        run: |
-          npm ci
-          npm run build
-        working-directory: frontend
-
       - name: Build 3X-UI
         run: |
           export CGO_ENABLED=1
@@ -162,7 +145,7 @@ jobs:
           wget -q -O geosite_IR.dat https://github.com/chocolate4u/Iran-v2ray-rules/releases/latest/download/geosite.dat
           wget -q -O geoip_RU.dat https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat
           wget -q -O geosite_RU.dat https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat
-          mv xray xray-linux-${{ matrix.platform }}
+          mv xray xray-linux-${GOARCH}
           cd ../..
 
       - name: Package
@@ -208,23 +191,6 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
-
-      # Frontend dist must be built BEFORE go build — see comment on the
-      # Linux job above. This step is identical except npm runs on the
-      # Windows runner here.
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend bundle
-        shell: pwsh
-        run: |
-          npm ci
-          npm run build
-        working-directory: frontend
 
       - name: Install MSYS2
         uses: msys2/setup-msys2@v2

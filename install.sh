@@ -110,83 +110,6 @@ gen_random_string() {
         | head -c "$length"
 }
 
-install_postgres_local() {
-    local pg_user="xui"
-    local pg_db="xui"
-    local pg_pass
-    pg_pass=$(gen_random_string 24)
-
-    case "${release}" in
-        ubuntu | debian | armbian)
-            apt-get update >&2 && apt-get install -y -q postgresql >&2 || return 1
-            ;;
-        fedora | amzn | virtuozzo | rhel | almalinux | rocky | ol)
-            dnf install -y -q postgresql-server postgresql-contrib >&2 || return 1
-            [[ -d /var/lib/pgsql/data && -f /var/lib/pgsql/data/PG_VERSION ]] || postgresql-setup --initdb >&2 || return 1
-            ;;
-        centos)
-            if [[ "${VERSION_ID}" =~ ^7 ]]; then
-                yum install -y postgresql-server postgresql-contrib >&2 || return 1
-            else
-                dnf install -y -q postgresql-server postgresql-contrib >&2 || return 1
-            fi
-            [[ -d /var/lib/pgsql/data && -f /var/lib/pgsql/data/PG_VERSION ]] || postgresql-setup --initdb >&2 || return 1
-            ;;
-        arch | manjaro | parch)
-            pacman -Syu --noconfirm postgresql >&2 || return 1
-            if [[ ! -f /var/lib/postgres/data/PG_VERSION ]]; then
-                sudo -u postgres initdb -D /var/lib/postgres/data >&2 || return 1
-            fi
-            ;;
-        opensuse-tumbleweed | opensuse-leap)
-            zypper -q install -y postgresql-server postgresql-contrib >&2 || return 1
-            if [[ ! -f /var/lib/pgsql/data/PG_VERSION ]]; then
-                install -d -o postgres -g postgres -m 700 /var/lib/pgsql/data >&2 || return 1
-                su - postgres -c "initdb -D /var/lib/pgsql/data" >&2 || return 1
-            fi
-            ;;
-        alpine)
-            apk add --no-cache postgresql postgresql-contrib >&2 || return 1
-            if [[ ! -f /var/lib/postgresql/data/PG_VERSION ]]; then
-                /etc/init.d/postgresql setup >&2 || return 1
-            fi
-            rc-update add postgresql default >&2 2> /dev/null || true
-            rc-service postgresql start >&2 || return 1
-            ;;
-        *)
-            echo -e "${red}Unsupported distro for automatic PostgreSQL install: ${release}${plain}" >&2
-            return 1
-            ;;
-    esac
-
-    if [[ "${release}" != "alpine" ]]; then
-        systemctl enable --now postgresql >&2 || return 1
-    fi
-
-    # Wait briefly for the server to accept connections.
-    local i
-    for i in 1 2 3 4 5; do
-        sudo -u postgres psql -tAc 'SELECT 1' > /dev/null 2>&1 && break
-        sleep 1
-    done
-
-    # Idempotent role/db creation.
-    sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${pg_user}'" 2> /dev/null \
-        | grep -q 1 \
-        || sudo -u postgres psql -c "CREATE USER ${pg_user} WITH PASSWORD '${pg_pass}';" >&2 || return 1
-
-    sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${pg_db}'" 2> /dev/null \
-        | grep -q 1 \
-        || sudo -u postgres psql -c "CREATE DATABASE ${pg_db} OWNER ${pg_user};" >&2 || return 1
-
-    sudo -u postgres psql -c "ALTER USER ${pg_user} WITH PASSWORD '${pg_pass}';" >&2 || return 1
-
-    local pg_pass_enc
-    pg_pass_enc=$(printf '%s' "${pg_pass}" | sed -e 's/%/%25/g' -e 's/:/%3A/g' -e 's/@/%40/g' -e 's|/|%2F|g' -e 's/?/%3F/g' -e 's/#/%23/g')
-    echo "postgres://${pg_user}:${pg_pass_enc}@127.0.0.1:5432/${pg_db}?sslmode=disable"
-    return 0
-}
-
 install_acme() {
     echo -e "${green}Installing acme.sh for SSL certificate management...${plain}"
     cd ~ || return 1
@@ -605,24 +528,21 @@ ssl_cert_issue() {
 # Sets global `SSL_HOST` to the chosen domain/IP for Access URL usage
 prompt_and_setup_ssl() {
     local panel_port="$1"
-    local web_base_path="$2"
+    local web_base_path="$2" # expected without leading slash
     local server_ip="$3"
 
     local ssl_choice=""
-    SSL_SCHEME="https"
 
     echo -e "${yellow}Choose SSL certificate setup method:${plain}"
     echo -e "${green}1.${plain} Let's Encrypt for Domain (90-day validity, auto-renews)"
     echo -e "${green}2.${plain} Let's Encrypt for IP Address (6-day validity, auto-renews)"
     echo -e "${green}3.${plain} Custom SSL Certificate (Path to existing files)"
-    echo -e "${green}4.${plain} Skip SSL (advanced — behind reverse proxy / SSH tunnel only)"
     echo -e "${blue}Note:${plain} Options 1 & 2 require port 80 open. Option 3 requires manual paths."
-    echo -e "${blue}Note:${plain} Option 4 serves the panel over plain HTTP — only safe behind nginx/Caddy or an SSH tunnel."
     read -rp "Choose an option (default 2 for IP): " ssl_choice
     ssl_choice="${ssl_choice// /}" # Trim whitespace
 
-    # Default to 2 (IP cert) if input is empty or invalid (not 1, 3 or 4)
-    if [[ "$ssl_choice" != "1" && "$ssl_choice" != "3" && "$ssl_choice" != "4" ]]; then
+    # Default to 2 (IP cert) if input is empty or invalid (not 1 or 3)
+    if [[ "$ssl_choice" != "1" && "$ssl_choice" != "3" ]]; then
         ssl_choice="2"
     fi
 
@@ -733,41 +653,6 @@ prompt_and_setup_ssl() {
 
             systemctl restart x-ui > /dev/null 2>&1 || rc-service x-ui restart > /dev/null 2>&1
             ;;
-        4)
-            echo ""
-            echo -e "${red}⚠ Panel will be installed WITHOUT SSL/TLS.${plain}"
-            echo -e "${yellow}Login credentials and cookies will travel as plain HTTP.${plain}"
-            echo -e "${yellow}Only safe when:${plain}"
-            echo -e "${yellow}  • A reverse proxy (nginx, Caddy, Traefik) terminates TLS for you, or${plain}"
-            echo -e "${yellow}  • You access the panel exclusively via SSH tunnel${plain}"
-            echo ""
-
-            SSL_SCHEME="http"
-            SSL_HOST="${server_ip}"
-
-            local bind_local=""
-            read -rp "Bind the panel to 127.0.0.1 only? (recommended — forces SSH tunnel / reverse-proxy access) [y/N]: " bind_local
-            if [[ "$bind_local" == "y" || "$bind_local" == "Y" ]]; then
-                ${xui_folder}/x-ui setting -listenIP "127.0.0.1" > /dev/null 2>&1
-                SSL_HOST="127.0.0.1"
-                echo -e "${green}✓ Panel bound to 127.0.0.1 only. It is now unreachable from the public internet.${plain}"
-                echo ""
-                echo -e "${green}SSH Port Forwarding — open the panel from your local machine via:${plain}"
-                echo -e "  Standard SSH command:"
-                echo -e "  ${yellow}ssh -L 2222:127.0.0.1:${panel_port} root@${server_ip}${plain}"
-                echo -e "  If using an SSH key:"
-                echo -e "  ${yellow}ssh -i <sshkeypath> -L 2222:127.0.0.1:${panel_port} root@${server_ip}${plain}"
-                echo -e "  Then open in your browser:"
-                echo -e "  ${yellow}http://localhost:2222/${web_base_path}${plain}"
-                echo ""
-                echo -e "${yellow}Alternative: point a reverse proxy (nginx/Caddy) at 127.0.0.1:${panel_port} and let it terminate TLS.${plain}"
-            else
-                echo -e "${yellow}Panel will listen on all interfaces over plain HTTP. Make sure something else is terminating TLS in front of it.${plain}"
-            fi
-
-            systemctl restart x-ui > /dev/null 2>&1 || rc-service x-ui restart > /dev/null 2>&1
-            echo -e "${green}✓ SSL setup skipped.${plain}"
-            ;;
         *)
             echo -e "${red}Invalid option. Skipping SSL setup.${plain}"
             SSL_HOST="${server_ip}"
@@ -793,103 +678,18 @@ config_after_install() {
     for ip_address in "${URL_lists[@]}"; do
         local response=$(curl -s -w "\n%{http_code}" --max-time 3 "${ip_address}" 2> /dev/null)
         local http_code=$(echo "$response" | tail -n1)
-        local ip_result=$(echo "$response" | head -n-1 | tr -d '[:space:]"')
-        if [[ "${http_code}" == "200" && "${ip_result}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        local ip_result=$(echo "$response" | head -n-1 | tr -d '[:space:]')
+        if [[ "${http_code}" == "200" && -n "${ip_result}" ]]; then
             server_ip="${ip_result}"
             break
         fi
     done
-
-    if [[ -z "$server_ip" ]]; then
-        echo -e "${yellow}Could not auto-detect server IP from any provider.${plain}"
-        while [[ -z "$server_ip" ]]; do
-            read -rp "Please enter your server's public IPv4 address: " server_ip
-            server_ip="${server_ip// /}"
-            if [[ ! "$server_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo -e "${red}Invalid IPv4 address. Please try again.${plain}"
-                server_ip=""
-            fi
-        done
-    fi
 
     if [[ ${#existing_webBasePath} -lt 4 ]]; then
         if [[ "$existing_hasDefaultCredential" == "true" ]]; then
             local config_webBasePath=$(gen_random_string 18)
             local config_username=$(gen_random_string 10)
             local config_password=$(gen_random_string 10)
-
-            local db_label="SQLite (/etc/x-ui/x-ui.db)"
-            echo ""
-            echo -e "${green}═══════════════════════════════════════════${plain}"
-            echo -e "${green}     Database Selection                    ${plain}"
-            echo -e "${green}═══════════════════════════════════════════${plain}"
-            echo -e "  1) SQLite     (default — recommended for < 1000 clients)"
-            echo -e "  2) PostgreSQL (recommended for high client counts / many nodes)"
-            read -rp "Choose [1]: " db_choice
-            db_choice="${db_choice:-1}"
-            if [[ "$db_choice" == "2" ]]; then
-                local xui_env_file
-                case "${release}" in
-                    ubuntu | debian | armbian)
-                        xui_env_file="/etc/default/x-ui"
-                        ;;
-                    arch | manjaro | parch | alpine)
-                        xui_env_file="/etc/conf.d/x-ui"
-                        ;;
-                    *)
-                        xui_env_file="/etc/sysconfig/x-ui"
-                        ;;
-                esac
-
-                local xui_dsn=""
-                local pg_mode=""
-                while [[ -z "$xui_dsn" ]]; do
-                    echo ""
-                    echo -e "  1) Install PostgreSQL locally and create a dedicated user/db (recommended)"
-                    echo -e "  2) Use an existing PostgreSQL server (enter DSN)"
-                    read -rp "Choose [1]: " pg_mode
-                    pg_mode="${pg_mode:-1}"
-                    if [[ "$pg_mode" == "2" ]]; then
-                        while [[ -z "$xui_dsn" ]]; do
-                            read -rp "Enter PostgreSQL DSN (postgres://user:pass@host:port/dbname?sslmode=disable): " xui_dsn
-                            xui_dsn="${xui_dsn// /}"
-                        done
-                        db_label="PostgreSQL (external)"
-                    else
-                        echo -e "${yellow}Installing PostgreSQL — this may take a moment...${plain}"
-                        if xui_dsn=$(install_postgres_local); then
-                            db_label="PostgreSQL (xui@127.0.0.1:5432/xui)"
-                        else
-                            echo ""
-                            echo -e "${red}PostgreSQL installation failed.${plain}"
-                            echo -e "  1) Retry local install"
-                            echo -e "  2) Enter an external DSN instead"
-                            echo -e "  3) Abort install"
-                            echo -e "  4) Fall back to SQLite"
-                            read -rp "Choose [1]: " pg_fail
-                            pg_fail="${pg_fail:-1}"
-                            case "$pg_fail" in
-                                2) pg_mode="2" ;;
-                                3) echo -e "${red}Install aborted.${plain}"; exit 1 ;;
-                                4) db_choice="1"; xui_dsn=""; break ;;
-                                *) xui_dsn="" ;;
-                            esac
-                        fi
-                    fi
-                done
-                if [[ -n "$xui_dsn" ]]; then
-                    install -d -m 755 "$(dirname "$xui_env_file")"
-                    umask 077
-                    cat > "$xui_env_file" << EOF
-XUI_DB_TYPE=postgres
-XUI_DB_DSN=${xui_dsn}
-EOF
-                    chmod 600 "$xui_env_file"
-                    umask 022
-                    export XUI_DB_TYPE=postgres
-                    export XUI_DB_DSN="${xui_dsn}"
-                fi
-            fi
 
             read -rp "Would you like to customize the Panel Port settings? (If not, a random port will be applied) [y/n]: " config_confirm
             if [[ "${config_confirm}" == "y" || "${config_confirm}" == "Y" ]]; then
@@ -904,17 +704,13 @@ EOF
 
             echo ""
             echo -e "${green}═══════════════════════════════════════════${plain}"
-            echo -e "${green}     SSL Certificate Setup (RECOMMENDED)   ${plain}"
+            echo -e "${green}     SSL Certificate Setup (MANDATORY)     ${plain}"
             echo -e "${green}═══════════════════════════════════════════${plain}"
-            echo -e "${yellow}SSL is strongly recommended. Skip only if a reverse proxy${plain}"
-            echo -e "${yellow}or SSH tunnel handles TLS for you.${plain}"
+            echo -e "${yellow}For security, SSL certificate is required for all panels.${plain}"
             echo -e "${yellow}Let's Encrypt now supports both domains and IP addresses!${plain}"
             echo ""
 
             prompt_and_setup_ssl "${config_port}" "${config_webBasePath}" "${server_ip}"
-
-            # Retrieve the API token for display
-            local config_apiToken=$(${xui_folder}/x-ui setting -getApiToken true | grep -Eo 'apiToken: .+' | awk '{print $2}')
 
             # Display final credentials and access information
             echo ""
@@ -925,16 +721,10 @@ EOF
             echo -e "${green}Password:    ${config_password}${plain}"
             echo -e "${green}Port:        ${config_port}${plain}"
             echo -e "${green}WebBasePath: ${config_webBasePath}${plain}"
-            echo -e "${green}Database:    ${db_label}${plain}"
-            echo -e "${green}Access URL:  ${SSL_SCHEME}://${SSL_HOST}:${config_port}/${config_webBasePath}${plain}"
-            echo -e "${green}API Token:   ${config_apiToken}${plain}"
+            echo -e "${green}Access URL:  https://${SSL_HOST}:${config_port}/${config_webBasePath}${plain}"
             echo -e "${green}═══════════════════════════════════════════${plain}"
             echo -e "${yellow}⚠ IMPORTANT: Save these credentials securely!${plain}"
-            if [[ "$SSL_SCHEME" == "https" ]]; then
-                echo -e "${yellow}⚠ SSL Certificate: Enabled and configured${plain}"
-            else
-                echo -e "${yellow}⚠ SSL Certificate: Skipped — panel is HTTP-only. Use a reverse proxy or SSH tunnel.${plain}"
-            fi
+            echo -e "${yellow}⚠ SSL Certificate: Enabled and configured${plain}"
         else
             local config_webBasePath=$(gen_random_string 18)
             echo -e "${yellow}WebBasePath is missing or too short. Generating a new one...${plain}"
@@ -950,7 +740,7 @@ EOF
                 echo -e "${yellow}Let's Encrypt now supports both domains and IP addresses!${plain}"
                 echo ""
                 prompt_and_setup_ssl "${existing_port}" "${config_webBasePath}" "${server_ip}"
-                echo -e "${green}Access URL:  ${SSL_SCHEME}://${SSL_HOST}:${existing_port}/${config_webBasePath}${plain}"
+                echo -e "${green}Access URL:  https://${SSL_HOST}:${existing_port}/${config_webBasePath}${plain}"
             else
                 # If a cert already exists, just show the access URL
                 echo -e "${green}Access URL: https://${server_ip}:${existing_port}/${config_webBasePath}${plain}"
@@ -983,7 +773,7 @@ EOF
             echo -e "${yellow}Let's Encrypt now supports both domains and IP addresses!${plain}"
             echo ""
             prompt_and_setup_ssl "${existing_port}" "${existing_webBasePath}" "${server_ip}"
-            echo -e "${green}Access URL:  ${SSL_SCHEME}://${SSL_HOST}:${existing_port}/${existing_webBasePath}${plain}"
+            echo -e "${green}Access URL:  https://${SSL_HOST}:${existing_port}/${existing_webBasePath}${plain}"
         else
             echo -e "${green}SSL certificate already configured. No action needed.${plain}"
         fi

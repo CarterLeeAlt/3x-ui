@@ -1,4 +1,5 @@
 //go:build windows
+// +build windows
 
 package sys
 
@@ -9,7 +10,6 @@ import (
 	"unsafe"
 
 	"github.com/shirou/gopsutil/v4/net"
-	"golang.org/x/sys/windows"
 )
 
 var SIGUSR1 = syscall.Signal(0)
@@ -19,6 +19,7 @@ func GetConnectionCount(proto string) (int, error) {
 	if proto != "tcp" && proto != "udp" {
 		return 0, errors.New("invalid protocol")
 	}
+
 	stats, err := net.Connections(proto)
 	if err != nil {
 		return 0, err
@@ -39,9 +40,7 @@ func GetUDPCount() (int, error) {
 // --- CPU Utilization (Windows native) ---
 
 var (
-	// NewLazySystemDLL forces the load from %SystemRoot%\System32 so a
-	// kernel32.dll planted next to the binary can't hijack the call.
-	modKernel32        = windows.NewLazySystemDLL("kernel32.dll")
+	modKernel32        = syscall.NewLazyDLL("kernel32.dll")
 	procGetSystemTimes = modKernel32.NewProc("GetSystemTimes")
 
 	cpuMu      sync.Mutex
@@ -51,25 +50,32 @@ var (
 	hasLast    bool
 )
 
-func ftToUint64(ft windows.Filetime) uint64 {
+type filetime struct {
+	LowDateTime  uint32
+	HighDateTime uint32
+}
+
+// ftToUint64 converts a Windows FILETIME-like struct to a uint64 for
+// arithmetic and delta calculations used by CPUPercentRaw.
+func ftToUint64(ft filetime) uint64 {
 	return (uint64(ft.HighDateTime) << 32) | uint64(ft.LowDateTime)
 }
 
-// CPUPercentRaw returns instantaneous total CPU utilization across all
-// logical processors via Windows GetSystemTimes. The first call returns 0
-// while it initializes the baseline; subsequent calls compute deltas.
+// CPUPercentRaw returns the instantaneous total CPU utilization percentage using
+// Windows GetSystemTimes across all logical processors. The first call returns 0
+// as it initializes the baseline. Subsequent calls compute deltas.
 func CPUPercentRaw() (float64, error) {
-	var idleFT, kernelFT, userFT windows.Filetime
+	var idleFT, kernelFT, userFT filetime
 	r1, _, e1 := procGetSystemTimes.Call(
 		uintptr(unsafe.Pointer(&idleFT)),
 		uintptr(unsafe.Pointer(&kernelFT)),
 		uintptr(unsafe.Pointer(&userFT)),
 	)
-	if r1 == 0 {
-		if errno, _ := e1.(syscall.Errno); errno != 0 {
-			return 0, errno
+	if r1 == 0 { // failure
+		if e1 != nil {
+			return 0, e1
 		}
-		return 0, errors.New("GetSystemTimes failed")
+		return 0, syscall.GetLastError()
 	}
 
 	idle := ftToUint64(idleFT)
@@ -91,6 +97,7 @@ func CPUPercentRaw() (float64, error) {
 	kernelDelta := kernel - lastKernel
 	userDelta := user - lastUser
 
+	// Update for next call
 	lastIdle = idle
 	lastKernel = kernel
 	lastUser = user
@@ -99,10 +106,11 @@ func CPUPercentRaw() (float64, error) {
 	if total == 0 {
 		return 0, nil
 	}
-	// kernel time includes idle on Windows; busy = total - idle
+	// On Windows, kernel time includes idle time; busy = total - idle
 	busy := total - idleDelta
 
 	pct := float64(busy) / float64(total) * 100.0
+	// lower bound not needed; ratios of uint64 are non-negative
 	if pct > 100 {
 		pct = 100
 	}

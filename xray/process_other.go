@@ -4,4 +4,5 @@ package xray
 
 import "os/exec"
 
-func attachChildLifetime(_ *exec.Cmd) {}
+func configureChildProcess(_ *exec.Cmd) {}
+func attachChildLifetime(_ *exec.Cmd)   {}

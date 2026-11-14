@@ -2,11 +2,9 @@ package controller
 
 import (
 	"net/http"
-	"strings"
 
-	"github.com/mhsanaei/3x-ui/v3/web/middleware"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
-	"github.com/mhsanaei/3x-ui/v3/web/session"
+	"github.com/mhsanaei/3x-ui/v2/web/service"
+	"github.com/mhsanaei/3x-ui/v2/web/session"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,10 +14,6 @@ type APIController struct {
 	BaseController
 	inboundController *InboundController
 	serverController  *ServerController
-	nodeController    *NodeController
-	settingService    service.SettingService
-	userService       service.UserService
-	apiTokenService   service.ApiTokenService
 	Tgbot             service.Tgbot
 }
 
@@ -30,25 +24,11 @@ func NewAPIController(g *gin.RouterGroup, customGeo *service.CustomGeoService) *
 	return a
 }
 
+// checkAPIAuth is a middleware that returns 404 for unauthenticated API requests
+// to hide the existence of API endpoints from unauthorized users
 func (a *APIController) checkAPIAuth(c *gin.Context) {
-	auth := c.GetHeader("Authorization")
-	if after, ok := strings.CutPrefix(auth, "Bearer "); ok {
-		tok := after
-		if a.apiTokenService.Match(tok) {
-			if u, err := a.userService.GetFirstUser(); err == nil {
-				session.SetAPIAuthUser(c, u)
-			}
-			c.Set("api_authed", true)
-			c.Next()
-			return
-		}
-	}
 	if !session.IsLogin(c) {
-		if c.GetHeader("X-Requested-With") == "XMLHttpRequest" {
-			c.AbortWithStatus(http.StatusUnauthorized)
-		} else {
-			c.AbortWithStatus(http.StatusNotFound)
-		}
+		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
 	c.Next()
@@ -59,27 +39,19 @@ func (a *APIController) initRouter(g *gin.RouterGroup, customGeo *service.Custom
 	// Main API group
 	api := g.Group("/panel/api")
 	api.Use(a.checkAPIAuth)
-	api.Use(middleware.CSRFMiddleware())
 
 	// Inbounds API
 	inbounds := api.Group("/inbounds")
 	a.inboundController = NewInboundController(inbounds)
 
-	clients := api.Group("/clients")
-	NewClientController(clients)
-
 	// Server API
 	server := api.Group("/server")
 	a.serverController = NewServerController(server)
 
-	// Nodes API — multi-panel management
-	nodes := api.Group("/nodes")
-	a.nodeController = NewNodeController(nodes)
-
 	NewCustomGeoController(api.Group("/custom-geo"), customGeo)
 
 	// Extra routes
-	api.POST("/backuptotgbot", a.BackuptoTgbot)
+	api.GET("/backuptotgbot", a.BackuptoTgbot)
 }
 
 // BackuptoTgbot sends a backup of the panel data to Telegram bot admins.

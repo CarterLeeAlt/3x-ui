@@ -3,7 +3,6 @@ package random
 
 import (
 	"crypto/rand"
-	"encoding/base64"
 	"math/big"
 )
 
@@ -59,15 +58,4 @@ func Num(n int) int {
 		panic("crypto/rand failed: " + err.Error())
 	}
 	return int(r.Int64())
-}
-
-// Base64Bytes returns n cryptographically-random bytes encoded as standard
-// base64 (with padding). Used for ss2022 keys, which xray expects as a
-// base64-encoded key of a specific byte length per cipher.
-func Base64Bytes(n int) string {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
-	}
-	return base64.StdEncoding.EncodeToString(b)
 }

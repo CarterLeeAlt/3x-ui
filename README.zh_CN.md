@@ -12,8 +12,8 @@
 [![GO Version](https://img.shields.io/github/go-mod/go-version/mhsanaei/3x-ui.svg)](#)
 [![Downloads](https://img.shields.io/github/downloads/mhsanaei/3x-ui/total.svg)](https://github.com/MHSanaei/3x-ui/releases/latest)
 [![License](https://img.shields.io/badge/license-GPL%20V3-blue.svg?longCache=true)](https://www.gnu.org/licenses/gpl-3.0.en.html)
-[![Go Reference](https://pkg.go.dev/badge/github.com/mhsanaei/3x-ui/v3.svg)](https://pkg.go.dev/github.com/mhsanaei/3x-ui/v3)
-[![Go Report Card](https://goreportcard.com/badge/github.com/mhsanaei/3x-ui/v3)](https://goreportcard.com/report/github.com/mhsanaei/3x-ui/v3)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mhsanaei/3x-ui/v2.svg)](https://pkg.go.dev/github.com/mhsanaei/3x-ui/v2)
+[![Go Report Card](https://goreportcard.com/badge/github.com/mhsanaei/3x-ui/v2)](https://goreportcard.com/report/github.com/mhsanaei/3x-ui/v2)
 
 **3X-UI** — 一个基于网页的高级开源控制面板，专为管理 Xray-core 服务器而设计。它提供了用户友好的界面，用于配置和监控各种 VPN 和代理协议。
 
@@ -24,8 +24,10 @@
 
 ## 快速开始
 
+本 fork 的定制版本号为 `2.9.5`，源码基线为上游 `v2.9.4`（`8bea0fde`），使用原版 Vue 2 界面和 SQLite 数据库。网页固定简体中文，主题默认明亮，仅手动切换并记住选择；Windows 管理页面仅监听 `127.0.0.1`。随包内核固定为官方 Xray `v26.3.27`。面板编译所用的 Xray Go 库独立包含安全修复，不替换内核程序。
+
 ```
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/CarterLeeAlt/3x-ui/main/install.sh)
 ```
 
 完整文档请参阅 [项目Wiki](https://github.com/MHSanaei/3x-ui/wiki)。
@@ -38,12 +40,6 @@ bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.
 
 - [Iran v2ray rules](https://github.com/chocolate4u/Iran-v2ray-rules) (许可证: **GPL-3.0**): _增强的 v2ray/xray 和 v2ray/xray-clients 路由规则，内置伊朗域名，专注于安全性和广告拦截。_
 - [Russia v2ray rules](https://github.com/runetfreedom/russia-v2ray-rules-dat) (许可证: **GPL-3.0**): _此仓库包含基于俄罗斯被阻止域名和地址数据自动更新的 V2Ray 路由规则。_
-
-## 社区工具
-
-社区围绕 3x-ui 构建的工具和集成。
-
-- [terraform-provider-3x-ui](https://github.com/batonogov/terraform-provider-threexui) (许可证: **MIT**): _使用 Terraform / OpenTofu 通过代码管理入站、客户端、面板设置和 Xray 配置。_
 
 ## 支持项目
 

@@ -4,9 +4,9 @@ case $1 in
         ARCH="64"
         FNAME="amd64"
         ;;
-    i386)
+    386 | i386)
         ARCH="32"
-        FNAME="i386"
+        FNAME="386"
         ;;
     armv8 | arm64 | aarch64)
         ARCH="arm64-v8a"
@@ -14,11 +14,12 @@ case $1 in
         ;;
     armv7 | arm | arm32)
         ARCH="arm32-v7a"
-        FNAME="arm32"
+        FNAME="arm"
+        if [ "$2" = "v6" ]; then ARCH="arm32-v6"; fi
         ;;
     armv6)
         ARCH="arm32-v6"
-        FNAME="armv6"
+        FNAME="arm"
         ;;
     *)
         ARCH="64"

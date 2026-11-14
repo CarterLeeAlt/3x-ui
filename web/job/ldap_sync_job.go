@@ -1,15 +1,18 @@
 package job
 
 import (
-	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"strings"
 
-	"github.com/mhsanaei/3x-ui/v3/database/model"
-	"github.com/mhsanaei/3x-ui/v3/logger"
-	ldaputil "github.com/mhsanaei/3x-ui/v3/util/ldap"
-	"github.com/mhsanaei/3x-ui/v3/web/service"
+	"github.com/mhsanaei/3x-ui/v2/database/model"
+	"github.com/mhsanaei/3x-ui/v2/logger"
+	ldaputil "github.com/mhsanaei/3x-ui/v2/util/ldap"
+	"github.com/mhsanaei/3x-ui/v2/web/service"
+
+	"strconv"
+
+	"github.com/google/uuid"
 )
 
 var DefaultTruthyValues = []string{"true", "1", "yes", "on"}
@@ -17,7 +20,6 @@ var DefaultTruthyValues = []string{"true", "1", "yes", "on"}
 type LdapSyncJob struct {
 	settingService service.SettingService
 	inboundService service.InboundService
-	clientService  service.ClientService
 	xrayService    service.XrayService
 }
 
@@ -133,29 +135,18 @@ func (j *LdapSyncJob) Run() {
 		}
 	}
 
+	// --- Execute batch create ---
 	for tag, newClients := range clientsToCreate {
 		if len(newClients) == 0 {
 			continue
 		}
-		ib := inboundMap[tag]
-		created := 0
-		restartNeeded := false
-		for _, c := range newClients {
-			nr, err := j.clientService.CreateOne(&j.inboundService, ib.Id, c)
-			if err != nil {
-				logger.Warningf("Failed to add client %s for tag %s: %v", c.Email, tag, err)
-				continue
-			}
-			created++
-			if nr {
-				restartNeeded = true
-			}
-		}
-		if created > 0 {
-			logger.Infof("LDAP auto-create: %d clients for %s", created, tag)
-			if restartNeeded {
-				j.xrayService.SetToNeedRestart()
-			}
+		payload := &model.Inbound{Id: inboundMap[tag].Id}
+		payload.Settings = j.clientsToJSON(newClients)
+		if _, err := j.inboundService.AddInboundClient(payload); err != nil {
+			logger.Warningf("Failed to add clients for tag %s: %v", tag, err)
+		} else {
+			logger.Infof("LDAP auto-create: %d clients for %s", len(newClients), tag)
+			j.xrayService.SetToNeedRestart()
 		}
 	}
 
@@ -215,31 +206,34 @@ func (j *LdapSyncJob) buildClient(ib *model.Inbound, email string, defGB, defExp
 	return c
 }
 
+// batchSetEnable enables/disables clients in batch through a single call
 func (j *LdapSyncJob) batchSetEnable(ib *model.Inbound, emails []string, enable bool) {
 	if len(emails) == 0 {
 		return
 	}
-	restartNeeded := false
-	changed := 0
+
+	// Prepare JSON for mass update
+	clients := make([]model.Client, 0, len(emails))
 	for _, email := range emails {
-		ok, needRestart, err := j.clientService.SetClientEnableByEmail(&j.inboundService, email, enable)
-		if err != nil {
-			logger.Warningf("Batch set enable failed for %s in inbound %s: %v", email, ib.Tag, err)
-			continue
-		}
-		if ok {
-			changed++
-		}
-		if needRestart {
-			restartNeeded = true
-		}
+		clients = append(clients, model.Client{
+			Email:  email,
+			Enable: enable,
+		})
 	}
-	if changed > 0 {
-		logger.Infof("Batch set enable=%v for %d clients in inbound %s", enable, changed, ib.Tag)
+
+	payload := &model.Inbound{
+		Id:       ib.Id,
+		Settings: j.clientsToJSON(clients),
 	}
-	if restartNeeded {
-		j.xrayService.SetToNeedRestart()
+
+	// Use a single AddInboundClient call to update enable
+	if _, err := j.inboundService.AddInboundClient(payload); err != nil {
+		logger.Warningf("Batch set enable failed for inbound %s: %v", ib.Tag, err)
+		return
 	}
+
+	logger.Infof("Batch set enable=%v for %d clients in inbound %s", enable, len(emails), ib.Tag)
+	j.xrayService.SetToNeedRestart()
 }
 
 // deleteClientsNotInLDAP deletes clients not in LDAP using batches and a single restart
@@ -275,28 +269,90 @@ func (j *LdapSyncJob) deleteClientsNotInLDAP(inboundTag string, ldapEmails map[s
 			continue
 		}
 
+		// Delete in batches
 		for i := 0; i < len(toDelete); i += batchSize {
 			end := min(i+batchSize, len(toDelete))
 			batch := toDelete[i:end]
 
 			for _, c := range batch {
-				nr, err := j.clientService.DetachByEmail(&j.inboundService, ib.Id, c.Email)
-				if err != nil {
+				var clientKey string
+				switch ib.Protocol {
+				case model.Trojan:
+					clientKey = c.Password
+				case model.Shadowsocks:
+					clientKey = c.Email
+				default: // vless/vmess
+					clientKey = c.ID
+				}
+
+				if _, err := j.inboundService.DelInboundClient(ib.Id, clientKey); err != nil {
 					logger.Warningf("Failed to delete client %s from inbound id=%d(tag=%s): %v",
 						c.Email, ib.Id, ib.Tag, err)
-					continue
-				}
-				logger.Infof("Deleted client %s from inbound id=%d(tag=%s)",
-					c.Email, ib.Id, ib.Tag)
-				if nr {
+				} else {
+					logger.Infof("Deleted client %s from inbound id=%d(tag=%s)",
+						c.Email, ib.Id, ib.Tag)
+					// do not restart here
 					restartNeeded = true
 				}
 			}
 		}
 	}
 
+	// One time after all batches
 	if restartNeeded {
 		j.xrayService.SetToNeedRestart()
 		logger.Info("Xray restart scheduled after batch deletion")
 	}
+}
+
+// clientsToJSON serializes an array of clients to JSON
+func (j *LdapSyncJob) clientsToJSON(clients []model.Client) string {
+	b := strings.Builder{}
+	b.WriteString("{\"clients\":[")
+	for i, c := range clients {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		b.WriteString(j.clientToJSON(c))
+	}
+	b.WriteString("]}")
+	return b.String()
+}
+
+// clientToJSON serializes minimal client fields to JSON object string without extra deps
+func (j *LdapSyncJob) clientToJSON(c model.Client) string {
+	// construct minimal JSON manually to avoid importing json for simple case
+	b := strings.Builder{}
+	b.WriteString("{")
+	if c.ID != "" {
+		b.WriteString("\"id\":\"")
+		b.WriteString(c.ID)
+		b.WriteString("\",")
+	}
+	if c.Password != "" {
+		b.WriteString("\"password\":\"")
+		b.WriteString(c.Password)
+		b.WriteString("\",")
+	}
+	b.WriteString("\"email\":\"")
+	b.WriteString(c.Email)
+	b.WriteString("\",")
+	b.WriteString("\"enable\":")
+	if c.Enable {
+		b.WriteString("true")
+	} else {
+		b.WriteString("false")
+	}
+	b.WriteString(",")
+	b.WriteString("\"limitIp\":")
+	b.WriteString(strconv.Itoa(c.LimitIP))
+	b.WriteString(",")
+	b.WriteString("\"totalGB\":")
+	b.WriteString(strconv.FormatInt(c.TotalGB, 10))
+	if c.ExpiryTime > 0 {
+		b.WriteString(",\"expiryTime\":")
+		b.WriteString(strconv.FormatInt(c.ExpiryTime, 10))
+	}
+	b.WriteString("}")
+	return b.String()
 }

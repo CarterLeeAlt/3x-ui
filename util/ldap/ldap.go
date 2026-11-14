@@ -3,7 +3,6 @@ package ldaputil
 import (
 	"crypto/tls"
 	"fmt"
-	"slices"
 
 	"github.com/go-ldap/ldap/v3"
 )
@@ -83,7 +82,13 @@ func FetchVlessFlags(cfg Config) (map[string]bool, error) {
 			continue
 		}
 		val := e.GetAttributeValue(cfg.FlagField)
-		enabled := slices.Contains(cfg.TruthyVals, val)
+		enabled := false
+		for _, t := range cfg.TruthyVals {
+			if val == t {
+				enabled = true
+				break
+			}
+		}
 		if cfg.Invert {
 			enabled = !enabled
 		}

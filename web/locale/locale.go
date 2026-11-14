@@ -4,15 +4,15 @@ package locale
 
 import (
 	"embed"
-	"encoding/json"
 	"io/fs"
 	"os"
 	"strings"
 
-	"github.com/mhsanaei/3x-ui/v3/logger"
+	"github.com/mhsanaei/3x-ui/v2/logger"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nicksnyder/go-i18n/v2/i18n"
+	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/text/language"
 )
 
@@ -30,17 +30,26 @@ const (
 	Web I18nType = "web" // Web interface type
 )
 
+// SettingService interface defines methods for accessing locale settings.
+type SettingService interface {
+	GetTgLang() (string, error)
+}
+
 // InitLocalizer initializes the internationalization system with embedded translation files.
-func InitLocalizer(i18nFS embed.FS) error {
-	i18nBundle = i18n.NewBundle(language.SimplifiedChinese)
-	i18nBundle.RegisterUnmarshalFunc("json", json.Unmarshal)
+func InitLocalizer(i18nFS embed.FS, settingService SettingService) error {
+	// set default bundle to English
+	i18nBundle = i18n.NewBundle(language.MustParse("en-US"))
+	i18nBundle.RegisterUnmarshalFunc("toml", toml.Unmarshal)
 
 	// parse files
 	if err := parseTranslationFiles(i18nFS, i18nBundle); err != nil {
 		return err
 	}
 
-	LocalizerBot = i18n.NewLocalizer(i18nBundle, "zh-CN")
+	// setup bot locale
+	if err := initTGBotLocalizer(settingService); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -96,15 +105,27 @@ func I18n(i18nType I18nType, key string, params ...string) string {
 	return msg
 }
 
+// initTGBotLocalizer initializes the bot localizer with the configured language.
+func initTGBotLocalizer(settingService SettingService) error {
+	botLang, err := settingService.GetTgLang()
+	if err != nil {
+		return err
+	}
+
+	LocalizerBot = i18n.NewLocalizer(i18nBundle, botLang)
+	return nil
+}
+
 // LocalizerMiddleware returns a Gin middleware that sets up localization for web requests.
-// It creates a Simplified Chinese localizer and stores it in the Gin context for use in handlers.
+// It determines the user's language from cookies or Accept-Language header,
+// creates a localizer instance, and stores it in the Gin context for use in handlers.
 // Also provides the I18n function in the context for template rendering.
 func LocalizerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Ensure bundle is initialized so creating a Localizer won't panic
 		if i18nBundle == nil {
-			i18nBundle = i18n.NewBundle(language.SimplifiedChinese)
-			i18nBundle.RegisterUnmarshalFunc("json", json.Unmarshal)
+			i18nBundle = i18n.NewBundle(language.MustParse("en-US"))
+			i18nBundle.RegisterUnmarshalFunc("toml", toml.Unmarshal)
 			// Try lazy-load from disk when running sub server without InitLocalizer
 			if err := loadTranslationsFromDisk(i18nBundle); err != nil {
 				logger.Warning("i18n lazy load failed:", err)

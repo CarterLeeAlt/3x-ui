@@ -12,9 +12,6 @@ on:
       - "**.ts"
       - "**.html"
       - "**.css"
-      - "frontend/package.json"
-      - "frontend/package-lock.json"
-      - ".nvmrc"
   push:
     branches:
       - main
@@ -28,9 +25,6 @@ on:
       - "**.ts"
       - "**.html"
       - "**.css"
-      - "frontend/package.json"
-      - "frontend/package-lock.json"
-      - ".nvmrc"
 
 permissions:
   contents: read
@@ -44,12 +38,24 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Stub web/dist for go:embed
-        run: mkdir -p web/dist && touch web/dist/.gitkeep
       - name: Test
-        run: |
-          go list ./... | grep -v '/frontend/node_modules/' > /tmp/go-packages.txt
-          go test $(cat /tmp/go-packages.txt)
+        run: go test ./...
+
+  windows-policy:
+    runs-on: windows-latest
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test Windows panel policy
+        run: go test ./web/service -run TestWindowsPanelLoopbackPolicy
+      - name: Test Windows service host
+        run: go test ./...
+        working-directory: windows_files/service-host
 
   govulncheck:
     runs-on: ubuntu-latest
@@ -59,31 +65,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Stub web/dist for go:embed
-        run: mkdir -p web/dist && touch web/dist/.gitkeep
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: Run govulncheck
         run: govulncheck ./...
-
-  frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install
-        run: npm ci
-        working-directory: frontend
-      - name: Lint
-        run: npm run lint
-        working-directory: frontend
-      - name: Build
-        run: npm run build
-        working-directory: frontend
-      - name: Audit
-        run: npm audit --audit-level=high
-        working-directory: frontend

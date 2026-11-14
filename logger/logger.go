@@ -9,27 +9,19 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/config"
+	"github.com/mhsanaei/3x-ui/v2/config"
 	"github.com/op/go-logging"
-
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 const (
 	maxLogBufferSize = 10240                 // Maximum log entries kept in memory
 	logFileName      = "3xui.log"            // Log file name
 	timeFormat       = "2006/01/02 15:04:05" // Log timestamp format
-
-	// On-disk rotation limits — single file capped, old segments pruned automatically.
-	maxLogFileMB    = 10 // rotate active log when larger than this
-	maxLogBackups   = 5  // rotated files retained (beyond current segment)
-	maxLogAgeDays   = 7  // remove rotated backups older than this (0 disables time-based pruning)
-	compressRotated = true
 )
 
 var (
-	logger     *logging.Logger
-	fileRotate *lumberjack.Logger // nil when file backend disabled
+	logger  *logging.Logger
+	logFile *os.File
 
 	// logBuffer maintains recent log entries in memory for web UI retrieval
 	logBuffer []struct {
@@ -89,8 +81,8 @@ func initDefaultBackend() logging.Backend {
 	return logging.NewBackendFormatter(backend, newFormatter(includeTime))
 }
 
-// initFileBackend creates the file logging backend with size/age‑bounded rotation
-// so log volume cannot grow without limit on disk.
+// initFileBackend creates the file logging backend.
+// Creates log directory and truncates log file on startup for fresh logs.
 func initFileBackend() logging.Backend {
 	logDir := config.GetLogFolder()
 	if err := os.MkdirAll(logDir, 0o750); err != nil {
@@ -99,16 +91,19 @@ func initFileBackend() logging.Backend {
 	}
 
 	logPath := filepath.Join(logDir, logFileName)
-	fileRotate = &lumberjack.Logger{
-		Filename:   logPath,
-		MaxSize:    maxLogFileMB,
-		MaxBackups: maxLogBackups,
-		MaxAge:     maxLogAgeDays,
-		LocalTime:  true,
-		Compress:   compressRotated,
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o660)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to open log file %s: %v\n", logPath, err)
+		return nil
 	}
 
-	backend := logging.NewLogBackend(fileRotate, "", 0)
+	// Close previous log file if exists
+	if logFile != nil {
+		_ = logFile.Close()
+	}
+	logFile = file
+
+	backend := logging.NewLogBackend(file, "", 0)
 	return logging.NewBackendFormatter(backend, newFormatter(true))
 }
 
@@ -121,12 +116,12 @@ func newFormatter(withTime bool) logging.Formatter {
 	return logging.MustStringFormatter(format)
 }
 
-// CloseLogger closes the rotating log writer and cleans up resources.
+// CloseLogger closes the log file and cleans up resources.
 // Should be called during application shutdown.
 func CloseLogger() {
-	if fileRotate != nil {
-		_ = fileRotate.Close()
-		fileRotate = nil
+	if logFile != nil {
+		_ = logFile.Close()
+		logFile = nil
 	}
 }
 

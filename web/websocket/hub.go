@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v3/logger"
+	"github.com/mhsanaei/3x-ui/v2/logger"
 )
 
 // MessageType identifies the kind of WebSocket message.
@@ -18,33 +18,39 @@ const (
 	MessageTypeTraffic      MessageType = "traffic"
 	MessageTypeInbounds     MessageType = "inbounds"
 	MessageTypeOutbounds    MessageType = "outbounds"
-	MessageTypeNodes        MessageType = "nodes"
 	MessageTypeNotification MessageType = "notification"
 	MessageTypeXrayState    MessageType = "xray_state"
-	MessageTypeClientStats  MessageType = "client_stats"
-	MessageTypeClients      MessageType = "clients"
-	MessageTypeInvalidate   MessageType = "invalidate"
-	maxMessageSize                      = 10 * 1024 * 1024 // 10MB
+	// MessageTypeClientStats carries absolute traffic counters for the clients
+	// that had activity in the latest collection window. Frontend applies these
+	// in-place — far smaller than re-broadcasting the full inbound list and
+	// scales to 10k+ clients without falling back to REST.
+	MessageTypeClientStats MessageType = "client_stats"
+	MessageTypeInvalidate  MessageType = "invalidate" // Tells frontend to re-fetch via REST (last-resort).
 
-	enqueueTimeout       = 100 * time.Millisecond
-	clientSendQueue      = 512  // ~50s of buffering for a momentarily slow browser.
-	hubBroadcastQueue    = 2048 // Headroom for cron-storm + admin-mutation bursts.
-	hubOpsQueue          = 128  // Backlog for register+unregister bursts (page reloads, disconnect storms).
+	// maxMessageSize caps the WebSocket payload. Beyond this the hub sends a
+	// lightweight invalidate signal and the frontend re-fetches via REST.
+	// 10MB lets typical 2k–8k-client deployments push directly via WS (low
+	// latency); larger installs fall back to invalidate.
+	maxMessageSize = 10 * 1024 * 1024 // 10MB
+
+	enqueueTimeout    = 100 * time.Millisecond
+	clientSendQueue   = 512  // ~50s of buffering for a momentarily slow browser.
+	hubBroadcastQueue = 2048 // Headroom for cron-storm + admin-mutation bursts.
+	hubControlQueue   = 64   // Backlog for register/unregister bursts (page reloads, disconnect storms).
+
+	// minBroadcastInterval throttles per-type broadcasts so cron storms or
+	// rapid mutations cannot drown the hub. Bursts within the interval are
+	// dropped (not coalesced); the next broadcast outside the window delivers
+	// the latest state. Only message types in throttledMessageTypes are gated —
+	// heartbeat and real-time signals (status, traffic, client_stats,
+	// notification, xray_state, invalidate) bypass this so they are never delayed.
 	minBroadcastInterval = 250 * time.Millisecond
-	hubRestartAttempts   = 3
+
+	// hubRestartAttempts caps panic-recovery restarts. After this many
+	// consecutive failures we stop trying and log; the panel keeps running
+	// (frontend falls back to REST polling) and the operator can investigate.
+	hubRestartAttempts = 3
 )
-
-type clientOpKind int
-
-const (
-	opRegister clientOpKind = iota
-	opUnregister
-)
-
-type clientOp struct {
-	kind clientOpKind
-	c    *Client
-}
 
 // NewClient builds a Client ready for hub registration.
 func NewClient(id string) *Client {
@@ -70,12 +76,13 @@ type Client struct {
 
 // Hub fan-outs messages to all connected clients.
 type Hub struct {
-	clients   map[*Client]struct{}
-	broadcast chan []byte
-	ops       chan clientOp
-	mu        sync.RWMutex
-	ctx       context.Context
-	cancel    context.CancelFunc
+	clients    map[*Client]struct{}
+	broadcast  chan []byte
+	register   chan *Client
+	unregister chan *Client
+	mu         sync.RWMutex
+	ctx        context.Context
+	cancel     context.CancelFunc
 
 	throttleMu    sync.Mutex
 	lastBroadcast map[MessageType]time.Time
@@ -87,20 +94,27 @@ func NewHub() *Hub {
 	return &Hub{
 		clients:       make(map[*Client]struct{}),
 		broadcast:     make(chan []byte, hubBroadcastQueue),
-		ops:           make(chan clientOp, hubOpsQueue),
+		register:      make(chan *Client, hubControlQueue),
+		unregister:    make(chan *Client, hubControlQueue),
 		ctx:           ctx,
 		cancel:        cancel,
 		lastBroadcast: make(map[MessageType]time.Time),
 	}
 }
 
+// throttledMessageTypes is the explicit allow-list of message types subject to
+// the per-type rate limit. Everything else (status, traffic, client_stats,
+// notification, xray_state, invalidate) is heartbeat- or signal-class and must
+// not be delayed. Keeping the set explicit (vs. an exclusion list) makes the
+// intent obvious when new message types are added — by default they bypass.
 var throttledMessageTypes = map[MessageType]struct{}{
-	MessageTypeInbounds:    {},
-	MessageTypeOutbounds:   {},
-	MessageTypeTraffic:     {},
-	MessageTypeClientStats: {},
+	MessageTypeInbounds:  {},
+	MessageTypeOutbounds: {},
 }
 
+// shouldThrottle returns true if a broadcast of msgType is rate-limited and
+// happened within minBroadcastInterval of the previous one. Only message types
+// in throttledMessageTypes are gated.
 func (h *Hub) shouldThrottle(msgType MessageType) bool {
 	if _, gated := throttledMessageTypes[msgType]; !gated {
 		return false
@@ -120,7 +134,7 @@ func (h *Hub) shouldThrottle(msgType MessageType) bool {
 // panic doesn't permanently kill real-time updates for commercial deployments.
 // After the cap, the hub stays down and the frontend falls back to REST polling.
 func (h *Hub) Run() {
-	for attempt := range hubRestartAttempts {
+	for attempt := 0; attempt < hubRestartAttempts; attempt++ {
 		stopped := h.runOnce()
 		if stopped {
 			return
@@ -155,20 +169,21 @@ func (h *Hub) runOnce() (stopped bool) {
 			h.shutdown()
 			return true
 
-		case op := <-h.ops:
-			if op.c == nil {
+		case c := <-h.register:
+			if c == nil {
 				continue
 			}
-			switch op.kind {
-			case opRegister:
-				h.mu.Lock()
-				h.clients[op.c] = struct{}{}
-				n := len(h.clients)
-				h.mu.Unlock()
-				logger.Debugf("WebSocket client connected: %s (total: %d)", op.c.ID, n)
-			case opUnregister:
-				h.removeClient(op.c)
+			h.mu.Lock()
+			h.clients[c] = struct{}{}
+			n := len(h.clients)
+			h.mu.Unlock()
+			logger.Debugf("WebSocket client connected: %s (total: %d)", c.ID, n)
+
+		case c := <-h.unregister:
+			if c == nil {
+				continue
 			}
+			h.removeClient(c)
 
 		case msg := <-h.broadcast:
 			h.fanout(msg)
@@ -330,29 +345,29 @@ func (h *Hub) Register(c *Client) {
 		return
 	}
 	select {
-	case h.ops <- clientOp{kind: opRegister, c: c}:
+	case h.register <- c:
 	case <-h.ctx.Done():
 	}
 }
 
-// Unregister removes a client from the hub. Sends through the same ordered
-// ops channel as Register so a register-then-unregister sequence from one
-// goroutine is processed in program order — otherwise an unregister could
-// land in the map before its register and silently no-op, leaking the entry.
+// Unregister removes a client from the hub. Fast path queues for the hub
+// goroutine; if the channel is saturated (disconnect storm) we fall back
+// to a direct removal under the write lock so dead clients aren't left in
+// the registry waiting for their Send buffer to fill (minutes of wasted
+// fanout work at low broadcast rates).
 //
-// On a saturated ops channel (disconnect storm) we fall back to a bounded
-// timeout drop rather than direct removal: a direct delete on a not-yet-
-// registered client is precisely the ordering bug we fix here. Stragglers
-// get evicted by fanout when their Send buffer fills.
+// Direct removal is safe from any caller: external goroutines (read/write
+// pumps) hold no hub locks, and the hub goroutine itself never holds h.mu
+// when it calls Unregister — fanout releases its RLock before per-client
+// sends, so we can't self-deadlock here.
 func (h *Hub) Unregister(c *Client) {
 	if h == nil || c == nil {
 		return
 	}
 	select {
-	case h.ops <- clientOp{kind: opUnregister, c: c}:
-	case <-time.After(enqueueTimeout):
-		logger.Warningf("WebSocket ops channel full, dropping unregister for %s", c.ID)
-	case <-h.ctx.Done():
+	case h.unregister <- c:
+	default:
+		h.removeClient(c)
 	}
 }
 
