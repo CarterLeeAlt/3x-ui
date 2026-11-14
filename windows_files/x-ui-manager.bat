@@ -304,6 +304,7 @@ function Read-MenuSelection([string]$LastResult) {
             if ($screen -ne $previous -or $size -ne $previousSize) {
                 Clear-Menu
                 Write-Host $screen
+                Write-Host '  请选择 [1–5 / R / 0]：' -NoNewline
                 $previous = $screen
                 $previousSize = $size
             }

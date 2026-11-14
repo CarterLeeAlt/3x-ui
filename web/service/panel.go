@@ -57,7 +57,7 @@ func (s *PanelService) GetUpdateInfo() (*PanelUpdateInfo, error) {
 	}, nil
 }
 
-// StartUpdate starts the official updater outside of the current web request.
+// StartUpdate starts the repository updater outside of the current web request.
 func (s *PanelService) StartUpdate() error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("panel web update is supported only on Linux installations")
@@ -73,7 +73,7 @@ func (s *PanelService) StartUpdate() error {
 	}
 
 	mainFolder, serviceFolder := resolveUpdateFolders()
-	updateScript := fmt.Sprintf("set -o pipefail; %s -fLs https://raw.githubusercontent.com/MHSanaei/3x-ui/main/update.sh | %s", shellQuote(curl), shellQuote(bash))
+	updateScript := fmt.Sprintf("set -o pipefail; %s -fLs https://raw.githubusercontent.com/CarterLeeAlt/3x-ui/main/update.sh | %s", shellQuote(curl), shellQuote(bash))
 
 	if systemdRun, err := exec.LookPath("systemd-run"); err == nil {
 		unitName := fmt.Sprintf("x-ui-web-update-%d", time.Now().Unix())
