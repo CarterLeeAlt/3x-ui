@@ -25,8 +25,9 @@ exit /b %MANAGER_EXIT%
 POWERSHELL_PAYLOAD_BEGINparam([string]$Action, [Parameter(Mandatory = $true)][string]$Root)
 
 $ErrorActionPreference = 'Stop'
+[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-$OutputEncoding = [Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::InputEncoding
 $root = [IO.Path]::GetFullPath($Root)
 if ($root.Length -gt 3 -and $root.EndsWith('\')) { $root = $root.TrimEnd('\') }
 $dbFolder = Join-Path $root 'runtime\db'
@@ -188,12 +189,12 @@ function Get-PanelSettings {
 function Write-Title([string]$text) {
     Write-Host ''
     Write-Separator
-    Write-Host "  $text"
+    Write-Host "  $text" -ForegroundColor Cyan
     Write-Separator
 }
 
 function Write-Separator {
-    Write-Host ('-' * (Get-DisplayWidth))
+    Write-Host ('-' * (Get-DisplayWidth)) -ForegroundColor DarkGray
 }
 
 function Get-DisplayWidth {
@@ -238,89 +239,77 @@ function Get-DisplayVersion([string]$Path, [switch]$Core) {
     } catch { "读取失败：$($_.Exception.Message)" }
 }
 
-function Get-StatusLines {
-    "  程序版本  $(Get-DisplayVersion $panel)    Xray $(Get-DisplayVersion $xray -Core)"
+function Write-StatusLine([string]$Label, [string]$Value, [ConsoleColor]$Color = 'White') {
+    Write-Host "  $Label  " -NoNewline -ForegroundColor Gray
+    Write-Host $Value -ForegroundColor $Color
+}
+
+function Write-StatusLines {
+    Write-StatusLine '程序版本' "$(Get-DisplayVersion $panel)    Xray $(Get-DisplayVersion $xray -Core)"
     try {
         $processes = @(Get-InstanceProcesses)
         foreach ($entry in @(@('面板进程', 'x-ui.exe'), @('内核进程', 'xray-windows-amd64.exe'))) {
             $found = @($processes | Where-Object Name -eq $entry[1])
             $state = if ($found.Count) { "运行中 · PID $(($found.ProcessId) -join ', ')" } else { '已停止' }
-            "  $($entry[0])  $state"
+            $color = if ($found.Count) { 'Green' } else { 'Yellow' }
+            Write-StatusLine $entry[0] $state $color
         }
         $service = Get-OwnedService
         if ($service) {
-            "  服务状态  $(Get-ServiceText $service.State) · $serviceName · $(Get-ServiceText $service.StartMode)启动"
-            "  服务账户  $($service.StartName)"
-        } else { '  服务状态  未安装 · 使用普通后台模式' }
-    } catch { "  运行状态  读取失败：$($_.Exception.Message)" }
+            $color = if ($service.State -eq 'Running') { 'Green' } else { 'Yellow' }
+            Write-StatusLine '服务状态' "$(Get-ServiceText $service.State) · $serviceName · $(Get-ServiceText $service.StartMode)启动" $color
+            Write-StatusLine '服务账户' $service.StartName
+        } else { Write-StatusLine '服务状态' '未安装 · 使用普通后台模式' 'Yellow' }
+    } catch { Write-StatusLine '运行状态' "读取失败：$($_.Exception.Message)" 'Red' }
     try {
         $settings = Get-PanelSettings
         if ($settings) {
-            "  面板地址  $($settings.WebAddress)"
+            Write-StatusLine '面板地址' $settings.WebAddress 'Cyan'
             $subState = if ($settings.SubEnable) { '已启用' } else { '已关闭' }
-            "  订阅配置  $subState · 端口 $($settings.SubPort) · 监听 $($settings.SubListen)"
-            "  订阅路径  $($settings.SubPath)（需拼接用户订阅 ID）"
+            $color = if ($settings.SubEnable) { 'Green' } else { 'Yellow' }
+            Write-StatusLine '订阅配置' "$subState · 端口 $($settings.SubPort) · 监听 $($settings.SubListen)" $color
+            Write-StatusLine '订阅路径' "$($settings.SubPath)（需拼接用户订阅 ID）"
         } else {
-            '  面板地址  http://127.0.0.1:2053/（首次启动默认值）'
-            "  订阅配置  首次启动使用端口 $defaultSubPort"
+            Write-StatusLine '面板地址' 'http://127.0.0.1:2053/（首次启动默认值）' 'Cyan'
+            Write-StatusLine '订阅配置' "首次启动使用端口 $defaultSubPort" 'Yellow'
         }
-    } catch { "  面板配置  读取失败：$($_.Exception.Message)" }
+    } catch { Write-StatusLine '面板配置' "读取失败：$($_.Exception.Message)" 'Red' }
     $dbState = if (Test-Path -LiteralPath $dbPath -PathType Leaf) { '已创建' } else { '首次启动时创建' }
-    "  数据文件  runtime\db\x-ui.db（$dbState）"
-    '  运行日志  runtime\log\'
-    '  启动排错  runtime\log\manager-start-error.log'
-    '  服务日志  runtime\log\service.log'
-    "  工作目录  $root"
-    '  网络信息为已保存配置，生效状态以实际监听为准。'
+    Write-StatusLine '数据文件' "runtime\db\x-ui.db（$dbState）"
+    Write-StatusLine '运行日志' 'runtime\log\'
+    Write-StatusLine '启动排错' 'runtime\log\manager-start-error.log'
+    Write-StatusLine '服务日志' 'runtime\log\service.log'
+    Write-StatusLine '工作目录' $root
+    Write-Host '  网络信息为已保存配置，生效状态以实际监听为准。' -ForegroundColor DarkGray
 }
 
 function Status {
     Write-Title '运行状态'
-    Write-Host ((Get-StatusLines) -join "`n")
+    Write-StatusLines
     Write-Separator
 }
 
-function Read-MenuSelection([string]$LastResult) {
-    $previous = ''
-    $nextRefresh = [DateTime]::MinValue
+function Read-MenuSelection([string]$LastResult, [ConsoleColor]$ResultColor) {
+    Clear-Menu
+    Write-Title '3X-UI · Windows 管理器'
+    Write-StatusLines
+    Write-Separator
+    Write-Host '  [1] 启动面板     [2] 停止面板' -ForegroundColor Cyan
+    Write-Host '  [3] 安装服务     [4] 卸载服务     [5] 清空数据并重装' -ForegroundColor Cyan
+    Write-Host '  [R] 刷新状态     [0] 退出管理器' -ForegroundColor Cyan
+    Write-Separator
+    Write-StatusLine '上次操作' $LastResult $ResultColor
+    Write-Host '  输入选项后按回车执行；输入 R 并回车刷新状态。' -ForegroundColor DarkGray
+    Write-Host ''
     do {
-        $size = "$([Console]::WindowWidth):$([Console]::WindowHeight)"
-        if ([DateTime]::UtcNow -ge $nextRefresh -or $size -ne $previousSize) {
-            $separator = '-' * (Get-DisplayWidth)
-            $lines = @(
-                $separator
-                '  3X-UI · Windows 管理器'
-                $separator
-                Get-StatusLines
-                $separator
-                '  1 启动面板     2 停止面板'
-                '  3 安装服务     4 卸载服务     5 清空数据并重装'
-                '  R 立即刷新     0 退出管理器'
-                $separator
-                "  上次操作  $LastResult"
-                '  状态每 3 秒自动更新；直接按对应按键，无需回车。'
-            )
-            $screen = $lines -join "`n"
-            if ($screen -ne $previous -or $size -ne $previousSize) {
-                Clear-Menu
-                Write-Host $screen
-                Write-Host '  请选择 [1–5 / R / 0]：' -NoNewline
-                $previous = $screen
-                $previousSize = $size
-            }
-            $nextRefresh = [DateTime]::UtcNow.AddSeconds(3)
-        }
         if ([Console]::IsInputRedirected) {
+            Write-Host '  请选择 [1–5 / R / 0]: ' -NoNewline
             $selection = [Console]::ReadLine()
             if ($null -eq $selection) { return '0' }
-            return $selection
-        }
-        if ([Console]::KeyAvailable) {
-            $key = [Console]::ReadKey($true)
-            if ($key.Key -eq [ConsoleKey]::R) { $nextRefresh = [DateTime]::MinValue; continue }
-            if ($key.KeyChar -in @('0', '1', '2', '3', '4', '5')) { return [string]$key.KeyChar }
-        }
-        Start-Sleep -Milliseconds 100
+        } else { $selection = Read-Host '  请选择 [1–5 / R / 0]' }
+        $selection = $selection.Trim().ToUpperInvariant()
+        if ($selection -in @('0', '1', '2', '3', '4', '5', 'R')) { return $selection }
+        Write-Host '  无效选项，请输入 1–5、R 或 0，并按回车。' -ForegroundColor Yellow
     } while ($true)
 }
 
@@ -613,6 +602,7 @@ try {
         exit 0
     }
     $lastResult = '暂无'
+    $lastResultColor = 'DarkGray'
     $menuActions = @{
         '1' = @('start', '启动面板')
         '2' = @('stop', '停止面板')
@@ -621,17 +611,19 @@ try {
         '5' = @('reset', '清空数据并重装')
     }
     do {
-        $selection = Read-MenuSelection $lastResult
+        $selection = Read-MenuSelection $lastResult $lastResultColor
         if ($selection -eq '0') { break }
-        if (-not $menuActions.ContainsKey($selection)) { continue }
+        if ($selection -eq 'R') { continue }
         $item = $menuActions[$selection]
         Clear-Menu
         Write-Title $item[1]
         try {
             Run-Action $item[0]
             $lastResult = "$($item[1]) · $script:actionOutcome · $(Get-Date -Format 'HH:mm:ss')"
+            $lastResultColor = if ($script:actionOutcome -eq '已取消') { 'Yellow' } else { 'Green' }
         } catch {
             $lastResult = "$($item[1])失败：$($_.Exception.Message)"
+            $lastResultColor = 'Red'
             Write-Host "  $lastResult" -ForegroundColor Red
         }
         if (-not $script:actionStatusShown) { Status }
