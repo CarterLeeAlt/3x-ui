@@ -1,40 +1,69 @@
-Windows 平台注意事项：
-- 本 fork 的定制发布号为 2.9.5，使用上游 v2.9.4（8bea0fde）的原版界面与后端；随包内核为官方 Xray v26.3.27。
-- 页面固定简体中文，首次打开默认明亮；只响应手动切换主题并记住选择，不跟随系统主题或时间。
-- 数据库采用原版 SQLite 结构。上游 3.x 创建或迁移过的数据库不能直接作为旧版数据库使用；更换程序前保留原数据库副本。
-- Windows 无法安装 fail2ban
-- Windows 没有 bash 菜单
-- 忘记密码时，请用 https://sqlitebrowser.org/ 查看数据库
-- 程序需要保持运行
+============================================================
+  3X-UI · Windows 便携版
+============================================================
 
-默认设置：
-http://127.0.0.1:2053/
-用户名：admin
-密码：admin
-端口：2053
+发布版本：v2.9.5
+上游基线：v2.9.4（8bea0fde）
+随包内核：Xray v26.3.27（官方版）
 
-生成自签名证书：
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout localhost.key -out localhost.crt
-
+快速开始
 ------------------------------------------------------------
-便携版管理器（Windows）
+  解压到固定目录，双击 x-ui-manager.bat，选择“启动”。
+  浏览器打开：http://127.0.0.1:2053/
+  默认用户名：admin    默认密码：admin
+
+  首次启动自动创建数据库；关闭管理器后，程序继续后台运行。
+  主界面直接显示版本、进程、服务、访问地址及数据位置，每
+  3 秒自动刷新；网页中保存设置后会更新显示，按 R 可立即刷新。
+  操作后展示执行结果与最新状态，按回车返回主界面。
+  页面固定简体中文，默认明亮主题，手动切换后记住选择。
+  面板及管理 API 仅限本机访问；订阅和代理入站独立配置。
+  订阅端口缺省为 2196，实际地址与状态可在管理器中查看。
+
+常用命令
 ------------------------------------------------------------
-x-ui-manager.bat 是唯一入口，需在命令行或双击运行。
-  x-ui-manager.bat start          启动面板及其 Xray 内核
-  x-ui-manager.bat stop           停止本目录启动的面板和 Xray
-  x-ui-manager.bat status         显示面板、Xray、服务及订阅状态和数据路径
-  x-ui-manager.bat reset          重新安装随包版本
-  x-ui-manager.bat service-install  安装为 Windows 服务并启动
-  x-ui-manager.bat service-remove   停止并卸载该服务
+  在程序目录的终端运行；不带参数时打开交互菜单。
+
+  x-ui-manager.bat start            启动面板与 Xray
+  x-ui-manager.bat stop             停止面板与 Xray
+  x-ui-manager.bat status           查看状态、地址与数据路径
+  x-ui-manager.bat reset            清空数据并重装本版本
+  x-ui-manager.bat service-install  安装服务并启动
+  x-ui-manager.bat service-remove   停止并卸载服务，保留数据
   x-ui-manager.bat service-status   查看服务状态
-不带参数运行 x-ui-manager.bat 以普通权限显示菜单；安装、卸载和启停服务，以及服务已安装时重置，才请求管理员授权。操作结果在原窗口显示，按回车返回菜单。
-说明：
-- 首次执行 start 时会创建 runtime\db\x-ui.db；若数据库缺少 subPort 设置，会以 2196 补齐。
-- Windows 管理页面和管理 API 固定监听 127.0.0.1，设置不能改为其他地址；订阅服务和代理入站的监听配置保持独立。
-- 未安装服务时 start 隐藏启动普通后台实例，关闭管理器后继续运行；已安装服务时 start 和 stop 启停本目录注册的服务。安装服务时会停止普通实例并切换到服务运行。
-- stop 只处理从本目录启动的进程。Windows 无法正常关闭时会强制终止，并在输出中明确提示。
-- reset 会先要求确认，然后按 version.txt 记录的固定版本下载并检查 Windows 发布包。下载成功后停止运行，把本地全部数据（账户、设置、日志、证书及本目录其他文件）移入回收站，再解压恢复程序；执行入口在复制新文件前保留。完成后保持停止，执行 start 时重新生成默认数据库。服务注册保留。
-- reset 通过 curl 下载，遵循 HTTP_PROXY、HTTPS_PROXY、ALL_PROXY 环境变量；未设置时直连。下载失败时不会删除任何本地文件。
-- 服务名为 3x-ui，使用 Windows 内置 LocalService 账户，随系统启动，不需要登录或输入账户密码。脚本授予程序目录读取权限，以及 runtime、bin 目录写入权限，供数据库、日志、内核配置和资源更新使用。卸载服务不会删除数据。服务操作会核对注册路径，拒绝处理其他目录的同名服务。
-- 所有路径都相对本目录解析，可整体移动或改名；移动后若已安装服务，需先卸载再重新安装。
-- 数据库和日志位于 runtime\db、runtime\log，内核运行配置为 bin\config.json。状态查看从数据库读取当前配置；服务日志为 runtime\log\service.log。
+
+  启停仅操作本目录实例；无法正常停止时会提示并强制终止。
+
+开机自启
+------------------------------------------------------------
+  安装服务后随系统启动，无需登录；start / stop 改为启停服务。
+  服务名为 3x-ui，使用 Windows 内置 LocalService 账户。
+  安装时自动切换普通实例，并授予程序读取及运行目录写入权限。
+  服务管理按需请求管理员授权，日常打开菜单使用普通权限。
+  移动或改名目录前先卸载服务，移动后重新安装。
+
+数据与重装
+------------------------------------------------------------
+  数据库      runtime\db\x-ui.db
+  运行日志    runtime\log\
+  服务日志    runtime\log\service.log
+  内核配置    bin\config.json
+
+  reset 读取程序自身版本，下载并校验对应版本的安装包。
+  确认重装后，账户、设置、日志、证书及目录内其他文件会移入
+  回收站，再恢复程序。服务注册保留，重装后保持停止；下次
+  启动生成默认数据库。请提前备份需要保留的数据。
+  下载或校验失败时保留本地安装；下载使用 curl，支持
+  HTTP_PROXY、HTTPS_PROXY、ALL_PROXY，未设置时直连。
+
+补充说明
+------------------------------------------------------------
+  · 数据库沿用上游 v2.9.4 的 SQLite 结构；上游 3.x 创建或
+    迁移过的数据库不能直接使用，更换程序前请备份。
+  · 忘记密码可用 SQLite 工具查看数据库：https://sqlitebrowser.org/
+  · Windows 不支持 fail2ban 和 Bash 菜单，统一使用本管理器。
+  · Xray 项目：https://github.com/XTLS/Xray-core
+    使用文档：https://xtls.github.io （许可见 bin\LICENSE）
+  · 如需自签名证书，安装 OpenSSL 后在终端执行：
+
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout localhost.key -out localhost.crt

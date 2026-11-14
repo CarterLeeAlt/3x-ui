@@ -231,6 +231,7 @@ jobs:
           Invoke-WebRequest -Uri "${Xray_URL}Xray-windows-64.zip" -OutFile "Xray-windows-64.zip"
           Expand-Archive -Path "Xray-windows-64.zip" -DestinationPath .
           Remove-Item "Xray-windows-64.zip"
+          if (Test-Path README.md) { Remove-Item README.md }
           Remove-Item geoip.dat, geosite.dat -ErrorAction SilentlyContinue
           Invoke-WebRequest -Uri "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" -OutFile "geoip.dat"
           Invoke-WebRequest -Uri "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat" -OutFile "geosite.dat"
@@ -241,7 +242,16 @@ jobs:
           Rename-Item xray.exe xray-windows-amd64.exe
           cd ..
           Get-ChildItem ..\windows_files | Where-Object Name -ne 'service-host' | Copy-Item -Destination . -Recurse
-          Copy-Item -Path ..\config\version -Destination .\version.txt
+          $versionOutput = & .\x-ui.exe -v
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to read executable version' }
+          $version = ($versionOutput -join "`n").Trim().TrimStart('v')
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release version' }
+          $readmePath = Join-Path $PWD 'readme.txt'
+          $readme = [IO.File]::ReadAllText($readmePath, [Text.Encoding]::UTF8)
+          $versionLine = '(?m)^发布版本：[^\r\n]*'
+          if ([regex]::Matches($readme, $versionLine).Count -ne 1) { throw 'Missing or duplicate release version in readme.txt' }
+          $readme = [regex]::Replace($readme, $versionLine, "发布版本：v$version")
+          [IO.File]::WriteAllText($readmePath, $readme, [Text.UTF8Encoding]::new($false))
           cd ..
 
       - name: Build Windows service host

@@ -36,18 +36,18 @@ $dbPath = Join-Path $dbFolder 'x-ui.db'
 $panel = Join-Path $root 'x-ui.exe'
 $xray = Join-Path $binFolder 'xray-windows-amd64.exe'
 $defaultSubPort = 2196
-$resetVersion = 'v2.9.5'
-$versionFile = Join-Path $root 'version.txt'
-if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
-    $value = ([IO.File]::ReadAllText($versionFile)).Trim()
-    if ($value -match '^v?\d+\.\d+\.\d+$') {
-        if (-not $value.StartsWith('v')) { $value = "v$value" }
-        $resetVersion = $value
-    }
-}
-$releaseUrl = "https://github.com/CarterLeeAlt/3x-ui/releases/download/$resetVersion/x-ui-windows-amd64.zip"
 $serviceName = '3x-ui'
 $serviceExe = Join-Path $root 'x-ui-service.exe'
+$displayVersions = @{}
+
+function Get-PackageVersion([string]$Directory) {
+    $executable = Join-Path $Directory 'x-ui.exe'
+    $output = & $executable -v
+    if ($LASTEXITCODE -ne 0) { throw "读取程序版本失败（退出码 $LASTEXITCODE）: $executable" }
+    $version = ($output -join "`n").Trim()
+    if ($version -notmatch '^v?\d+\.\d+\.\d+$') { throw "程序返回的版本号无效: $version" }
+    'v' + $version.TrimStart('v')
+}
 
 function Set-RuntimeEnvironment {
     if ($env:XUI_DB_TYPE -and $env:XUI_DB_TYPE -ne 'sqlite') { throw '便携管理器仅管理本地 SQLite 数据库。' }
@@ -177,27 +177,35 @@ function Get-PanelSettings {
         $subEnable = (Get-Setting $handle 'subEnable') -ne 'false'
         $subPort = Get-Setting $handle 'subPort'
         if (-not $subPort) { $subPort = [string]$defaultSubPort }
-        [pscustomobject]@{ WebAddress="${scheme}://127.0.0.1:$port$base"; SubEnable=$subEnable; SubPort=$subPort }
+        $subListen = Get-Setting $handle 'subListen'
+        if (-not $subListen) { $subListen = '所有地址' }
+        $subPath = Get-Setting $handle 'subPath'
+        if (-not $subPath) { $subPath = '/sub/' }
+        [pscustomobject]@{ WebAddress="${scheme}://127.0.0.1:$port$base"; SubEnable=$subEnable; SubPort=$subPort; SubListen=$subListen; SubPath=$subPath }
     } finally { [void][ManagerSqlite]::sqlite3_close($handle) }
 }
 
 function Write-Title([string]$text) {
     Write-Host ''
-    Write-Host ('=' * 48)
+    Write-Separator
     Write-Host "  $text"
-    Write-Host ('=' * 48)
+    Write-Separator
 }
 
 function Write-Separator {
-    Write-Host ('-' * 48)
+    Write-Host ('-' * (Get-DisplayWidth))
+}
+
+function Get-DisplayWidth {
+    if ([Console]::IsOutputRedirected) { return 72 }
+    [Math]::Max(20, [Math]::Min(72, [Console]::WindowWidth - 1))
 }
 
 function Clear-Menu {
     if (-not [Console]::IsOutputRedirected) { Clear-Host }
 }
 
-function Get-ServiceText {
-    $state = Get-ServiceState
+function Get-ServiceText([string]$state) {
     if (-not $state) { return '未安装' }
     switch ($state) {
         'Running' { '运行中' }
@@ -205,28 +213,114 @@ function Get-ServiceText {
         'Start Pending' { '启动中' }
         'Stop Pending' { '停止中' }
         'Paused' { '已暂停' }
+        'Auto' { '自动' }
+        'Manual' { '手动' }
+        'Disabled' { '禁用' }
         default { "$state" }
     }
 }
 
+function Get-DisplayVersion([string]$Path, [switch]$Core) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '未找到程序' }
+    try {
+        $file = Get-Item -LiteralPath $Path
+        $stamp = "$($file.LastWriteTimeUtc.Ticks):$($file.Length)"
+        $cached = $displayVersions[$Path]
+        if ($cached -and $cached.Stamp -eq $stamp) { return $cached.Version }
+        if ($Core) {
+            $output = & $Path version
+            if ($LASTEXITCODE -ne 0) { throw "退出码 $LASTEXITCODE" }
+            if (($output | Select-Object -First 1) -notmatch '^Xray (\S+)') { throw '无法识别内核版本' }
+            $version = $Matches[1]
+        } else { $version = Get-PackageVersion ([IO.Path]::GetDirectoryName($Path)) }
+        $displayVersions[$Path] = @{ Stamp=$stamp; Version=$version }
+        $version
+    } catch { "读取失败：$($_.Exception.Message)" }
+}
+
+function Get-StatusLines {
+    "  程序版本  $(Get-DisplayVersion $panel)    Xray $(Get-DisplayVersion $xray -Core)"
+    try {
+        $processes = @(Get-InstanceProcesses)
+        foreach ($entry in @(@('面板进程', 'x-ui.exe'), @('内核进程', 'xray-windows-amd64.exe'))) {
+            $found = @($processes | Where-Object Name -eq $entry[1])
+            $state = if ($found.Count) { "运行中 · PID $(($found.ProcessId) -join ', ')" } else { '已停止' }
+            "  $($entry[0])  $state"
+        }
+        $service = Get-OwnedService
+        if ($service) {
+            "  服务状态  $(Get-ServiceText $service.State) · $serviceName · $(Get-ServiceText $service.StartMode)启动"
+            "  服务账户  $($service.StartName)"
+        } else { '  服务状态  未安装 · 使用普通后台模式' }
+    } catch { "  运行状态  读取失败：$($_.Exception.Message)" }
+    try {
+        $settings = Get-PanelSettings
+        if ($settings) {
+            "  面板地址  $($settings.WebAddress)"
+            $subState = if ($settings.SubEnable) { '已启用' } else { '已关闭' }
+            "  订阅配置  $subState · 端口 $($settings.SubPort) · 监听 $($settings.SubListen)"
+            "  订阅路径  $($settings.SubPath)（需拼接用户订阅 ID）"
+        } else {
+            '  面板地址  http://127.0.0.1:2053/（首次启动默认值）'
+            "  订阅配置  首次启动使用端口 $defaultSubPort"
+        }
+    } catch { "  面板配置  读取失败：$($_.Exception.Message)" }
+    $dbState = if (Test-Path -LiteralPath $dbPath -PathType Leaf) { '已创建' } else { '首次启动时创建' }
+    "  数据文件  runtime\db\x-ui.db（$dbState）"
+    '  运行日志  runtime\log\'
+    '  启动排错  runtime\log\manager-start-error.log'
+    '  服务日志  runtime\log\service.log'
+    "  工作目录  $root"
+    '  网络信息为已保存配置，生效状态以实际监听为准。'
+}
+
 function Status {
-    $processes = @(Get-InstanceProcesses)
     Write-Title '运行状态'
-    foreach ($entry in @(@('面板进程', 'x-ui.exe'), @('Xray 进程', 'xray-windows-amd64.exe'))) {
-        $found = @($processes | Where-Object Name -eq $entry[1])
-        if ($found.Count) { Write-Host "  $($entry[0]): 运行中 (PID $(($found.ProcessId) -join ', '))" }
-        else { Write-Host "  $($entry[0]): 已停止" }
-    }
-    Write-Host "  服务状态: $(Get-ServiceText)"
+    Write-Host ((Get-StatusLines) -join "`n")
     Write-Separator
-    Write-Host "  数据库: $dbPath"
-    $settings = Get-PanelSettings
-    if ($settings) {
-        Write-Host "  面板地址: $($settings.WebAddress)"
-        if ($settings.SubEnable) { Write-Host "  订阅端口: $($settings.SubPort)" }
-        else { Write-Host '  订阅服务: 已关闭' }
-    } else { Write-Host '  数据库未创建，启动时自动生成。' }
-    Write-Host ('=' * 48)
+}
+
+function Read-MenuSelection([string]$LastResult) {
+    $previous = ''
+    $nextRefresh = [DateTime]::MinValue
+    do {
+        $size = "$([Console]::WindowWidth):$([Console]::WindowHeight)"
+        if ([DateTime]::UtcNow -ge $nextRefresh -or $size -ne $previousSize) {
+            $separator = '-' * (Get-DisplayWidth)
+            $lines = @(
+                $separator
+                '  3X-UI · Windows 管理器'
+                $separator
+                Get-StatusLines
+                $separator
+                '  1 启动面板     2 停止面板'
+                '  3 安装服务     4 卸载服务     5 清空数据并重装'
+                '  R 立即刷新     0 退出管理器'
+                $separator
+                "  上次操作  $LastResult"
+                '  状态每 3 秒自动更新；直接按对应按键，无需回车。'
+            )
+            $screen = $lines -join "`n"
+            if ($screen -ne $previous -or $size -ne $previousSize) {
+                Clear-Menu
+                Write-Host $screen
+                $previous = $screen
+                $previousSize = $size
+            }
+            $nextRefresh = [DateTime]::UtcNow.AddSeconds(3)
+        }
+        if ([Console]::IsInputRedirected) {
+            $selection = [Console]::ReadLine()
+            if ($null -eq $selection) { return '0' }
+            return $selection
+        }
+        if ([Console]::KeyAvailable) {
+            $key = [Console]::ReadKey($true)
+            if ($key.Key -eq [ConsoleKey]::R) { $nextRefresh = [DateTime]::MinValue; continue }
+            if ($key.KeyChar -in @('0', '1', '2', '3', '4', '5')) { return [string]$key.KeyChar }
+        }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
 }
 
 function Start-Panel {
@@ -241,7 +335,7 @@ function Start-Panel {
             Start-Service -Name $serviceName
             Wait-ServiceState 'Running'
         }
-        Status
+        Write-Host "  服务 $serviceName 已运行，面板通过 Windows 服务管理。"
         return
     }
     if (@(Get-InstanceProcesses).Count) { throw '本目录的实例已在运行。' }
@@ -252,7 +346,9 @@ function Start-Panel {
     Start-Process -FilePath $panel -ArgumentList 'run' -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $out -RedirectStandardError $err | Out-Null
     Start-Sleep -Seconds 4
     if (-not @(Get-InstanceProcesses | Where-Object Name -eq 'x-ui.exe').Count) { throw "启动失败，请查看 $out 和 $err。" }
-    Status
+    Write-Host '  面板已启动，关闭管理器后继续后台运行。'
+    Write-Host "  启动日志: $out"
+    Write-Host "  错误日志: $err"
 }
 
 function Stop-Panel {
@@ -276,6 +372,7 @@ function Stop-Standalone([switch]$QuietIfStopped) {
     }
     foreach ($item in @($items | Sort-Object { if ($_.Name -eq 'x-ui.exe') { 0 } else { 1 } })) {
         if (-not (Get-Process -Id $item.ProcessId -ErrorAction SilentlyContinue)) { continue }
+        Write-Host "  正在停止 $($item.Name) (PID $($item.ProcessId))..."
         & taskkill.exe /PID $item.ProcessId *> $null
         Start-Sleep -Seconds 2
         if (@(Get-InstanceProcesses | Where-Object ProcessId -eq $item.ProcessId).Count) {
@@ -301,11 +398,16 @@ function Remove-ToRecycleBin([string]$path) {
 }
 
 function Reset-Panel {
-    if (-not $resetVersion) { throw '缺少有效的 version.txt，无法确定随包版本，拒绝恢复。' }
+    $resetVersion = Get-PackageVersion $root
+    $releaseUrl = "https://github.com/CarterLeeAlt/3x-ui/releases/download/$resetVersion/x-ui-windows-amd64.zip"
     $service = Get-OwnedService
     Write-Warning "重装 $resetVersion，清空本目录数据和其他文件（含账户、设置、日志、证书）。"
     if ($env:XUI_CONFIRM -cne 'RESET') {
-        if ((Read-Host '  输入 RESET 继续') -cne 'RESET') { Write-Host '  已取消。'; return }
+        if ((Read-Host '  输入 RESET 继续') -cne 'RESET') {
+            $script:actionOutcome = '已取消'
+            Write-Host '  已取消重装，程序与数据保持原状。'
+            return
+        }
     }
     if ($service -and -not (Test-Admin)) { Invoke-Administrator 'reset'; return }
     Add-Type -AssemblyName Microsoft.VisualBasic
@@ -322,11 +424,12 @@ function Reset-Panel {
         try { foreach ($entry in $archive.Entries) { $n = $entry.FullName.Replace('\', '/'); if ($n.StartsWith('/') -or $n -match '(^|/)\.\.(/|$)' -or $n -match '^[a-zA-Z]:') { throw "发布包路径不安全: $n" } } } finally { $archive.Dispose() }
         Expand-Archive -LiteralPath $zip -DestinationPath $stage
         $source = Join-Path $stage 'x-ui'
-        foreach ($name in @('x-ui.exe', 'x-ui-manager.bat', 'x-ui-service.exe', 'version.txt', 'bin\xray-windows-amd64.exe', 'bin\geoip.dat', 'bin\geosite.dat')) {
+        foreach ($name in @('x-ui.exe', 'x-ui-manager.bat', 'x-ui-service.exe', 'readme.txt', 'bin\xray-windows-amd64.exe', 'bin\geoip.dat', 'bin\geosite.dat')) {
             if (-not (Test-Path -LiteralPath (Join-Path $source $name) -PathType Leaf)) { throw "发布包缺少文件: $name" }
         }
-        $packageVersion = ([IO.File]::ReadAllText((Join-Path $source 'version.txt'))).Trim().TrimStart('v')
-        if ($packageVersion -ne $resetVersion.TrimStart('v')) { throw '发布包的版本与请求版本不一致，拒绝恢复。' }
+        $packageVersion = Get-PackageVersion $source
+        if ($packageVersion -ne $resetVersion) { throw '发布包的版本与请求版本不一致，拒绝恢复。' }
+        Write-Host "  安装包校验通过，版本: $packageVersion"
         Stop-Panel
         $keep = @('x-ui-manager.bat', 'x-ui-service.exe', '.x-ui-reset-staging')
         $items = @(Get-ChildItem -LiteralPath $root -Force | Where-Object { $_.Name -notin $keep })
@@ -337,6 +440,8 @@ function Reset-Panel {
             Grant-ServicePermissions
         }
         Write-Host "  已重置为 $resetVersion，面板已停止。"
+        Write-Host '  原数据已移入回收站；下次启动将生成默认数据库。'
+        if ($service) { Write-Host "  服务 $serviceName 的注册已保留，下次选择“启动”即可运行。" }
     } finally {
         if (Test-Path -LiteralPath $stage) {
             try { Remove-ToRecycleBin $stage } catch { Write-Warning "暂存目录清理失败: $stage" }
@@ -361,6 +466,7 @@ function Invoke-Administrator([ValidateSet('start','stop','reset','service-insta
         } catch {
             $cause = $_.Exception.GetBaseException()
             if ($cause -is [ComponentModel.Win32Exception] -and $cause.NativeErrorCode -eq 1223) {
+                $script:actionOutcome = '已取消'
                 Write-Host '  已取消管理员授权。'
                 return
             }
@@ -373,6 +479,7 @@ function Invoke-Administrator([ValidateSet('start','stop','reset','service-insta
             throw "管理员操作失败，退出码: $($process.ExitCode)"
         }
         if ($output) { Write-Host $output }
+        if ($Name -eq 'start') { $script:actionStatusShown = $true }
     } finally {
         if ($process) { $process.Dispose() }
         [IO.File]::Delete($outputFile)
@@ -411,7 +518,14 @@ function Grant-ServicePermissions {
 }
 
 function Service-Status {
-    Write-Host "  服务 $serviceName`: $(Get-ServiceText)"
+    $service = Get-OwnedService
+    Write-Host "  服务 $serviceName`: $(Get-ServiceText $service.State)"
+    if ($service) {
+        Write-Host "  启动类型: $(Get-ServiceText $service.StartMode)"
+        Write-Host "  运行账户: $($service.StartName)"
+        Write-Host "  程序路径: $($service.PathName)"
+        Write-Host "  服务日志: $(Join-Path $logFolder 'service.log')"
+    }
 }
 
 function Service-Install {
@@ -450,6 +564,8 @@ function Service-Install {
         throw $failure
     }
     Write-Host '  服务已安装并启动。'
+    Write-Host "  服务名: $serviceName · 账户: LocalService · 随系统启动"
+    Write-Host "  服务日志: $(Join-Path $logFolder 'service.log')"
 }
 
 function Service-Remove {
@@ -463,6 +579,8 @@ function Service-Remove {
     & sc.exe delete $serviceName | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "删除服务 '$serviceName' 失败。" }
     Write-Host '  服务已卸载，数据保留。'
+    Write-Host "  数据库: $dbPath"
+    Write-Host '  下次选择“启动”将以普通后台模式运行。'
 }
 
 function Prepare-Only {
@@ -472,6 +590,8 @@ function Prepare-Only {
 }
 
 function Run-Action([string]$name) {
+    $script:actionOutcome = '已完成'
+    $script:actionStatusShown = $false
     switch ($name.ToLowerInvariant()) {
         'start' { Start-Panel }
         'stop' { Stop-Panel }
@@ -486,38 +606,35 @@ function Run-Action([string]$name) {
 }
 
 try {
-    if ($Action) { Run-Action $Action; exit 0 }
+    if ($Action) {
+        Run-Action $Action
+        if ($Action -eq 'start' -and -not $script:actionStatusShown) { Status }
+        exit 0
+    }
+    $lastResult = '暂无'
+    $menuActions = @{
+        '1' = @('start', '启动面板')
+        '2' = @('stop', '停止面板')
+        '3' = @('service-install', '安装服务')
+        '4' = @('service-remove', '卸载服务')
+        '5' = @('reset', '清空数据并重装')
+    }
     do {
-        Clear-Menu
-        Write-Title '3x-ui 管理'
-        Write-Host '  1) 启动面板'
-        Write-Host '  2) 停止面板'
-        Write-Host '  3) 查看状态'
-        if ($resetVersion) { Write-Host "  4) 重置面板（$resetVersion）" }
-        else { Write-Host '  4) 重置面板（缺少版本文件）' }
-        Write-Separator
-        Write-Host '  5) 安装服务'
-        Write-Host '  6) 卸载服务'
-        Write-Host '  7) 查看服务状态'
-        Write-Separator
-        Write-Host '  0) 退出'
-        $selection = Read-Host '  请选择'
+        $selection = Read-MenuSelection $lastResult
         if ($selection -eq '0') { break }
+        if (-not $menuActions.ContainsKey($selection)) { continue }
+        $item = $menuActions[$selection]
         Clear-Menu
+        Write-Title $item[1]
         try {
-            switch ($selection) {
-                '1' { Run-Action 'start' }
-                '2' { Run-Action 'stop' }
-                '3' { Run-Action 'status' }
-                '4' { Run-Action 'reset' }
-                '5' { Run-Action 'service-install' }
-                '6' { Run-Action 'service-remove' }
-                '7' { Run-Action 'service-status' }
-                '0' { }
-                default { Write-Host '  无效选项。' }
-            }
-        } catch { Write-Host "  错误: $($_.Exception.Message)" }
-        [void](Read-Host '  按回车返回菜单')
+            Run-Action $item[0]
+            $lastResult = "$($item[1]) · $script:actionOutcome · $(Get-Date -Format 'HH:mm:ss')"
+        } catch {
+            $lastResult = "$($item[1])失败：$($_.Exception.Message)"
+            Write-Host "  $lastResult" -ForegroundColor Red
+        }
+        if (-not $script:actionStatusShown) { Status }
+        [void](Read-Host '  以上为操作结果和最新状态，按回车返回主界面')
     } while ($selection -ne '0')
     exit 0
 } catch {
